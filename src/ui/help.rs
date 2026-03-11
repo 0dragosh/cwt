@@ -8,7 +8,7 @@ use crate::ui::theme;
 
 /// Render the help overlay — a full-screen keybinding reference.
 pub fn render(f: &mut Frame) {
-    let area = centered_rect(60, 28, f.area());
+    let area = centered_rect(60, 33, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -29,6 +29,10 @@ pub fn render(f: &mut Frame) {
             ("g", "Run garbage collection"),
             ("r", "Restore from snapshot"),
             ("Enter", "Open shell in worktree (tmux pane)"),
+        ]),
+        ("Orchestration", vec![
+            ("t", "Dispatch tasks (multi-worktree)"),
+            ("b", "Broadcast prompt to all sessions"),
         ]),
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),
