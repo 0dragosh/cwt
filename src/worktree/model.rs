@@ -2,6 +2,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::env::container::ContainerInfo;
+use crate::env::ports::PortAllocation;
+use crate::env::resources::ResourceUsage;
 use crate::ship::pr::{CiStatus, PrStatus};
 
 /// Lifecycle of a worktree: ephemeral (auto-GC'd) or permanent (never auto-deleted).
@@ -52,6 +55,15 @@ pub struct Worktree {
     /// Current CI/GitHub Actions status.
     #[serde(default)]
     pub ci_status: CiStatus,
+    /// Container information (if running in a container).
+    #[serde(default)]
+    pub container: Option<ContainerInfo>,
+    /// Port allocation for this worktree.
+    #[serde(default)]
+    pub ports: Option<PortAllocation>,
+    /// Resource usage snapshot (disk, CPU, memory).
+    #[serde(default)]
+    pub resource_usage: Option<ResourceUsage>,
 }
 
 impl Worktree {
@@ -78,6 +90,9 @@ impl Worktree {
             pr_url: None,
             pr_status: PrStatus::None,
             ci_status: CiStatus::None,
+            container: None,
+            ports: None,
+            resource_usage: None,
         }
     }
 
@@ -91,5 +106,17 @@ impl Worktree {
             self.pr_status,
             PrStatus::Draft | PrStatus::Open | PrStatus::Approved
         )
+    }
+
+    /// Whether this worktree has an associated container.
+    pub fn has_container(&self) -> bool {
+        self.container.is_some()
+    }
+
+    /// Get the container ID if available.
+    pub fn container_id(&self) -> Option<&str> {
+        self.container
+            .as_ref()
+            .and_then(|c| c.container_id.as_deref())
     }
 }
