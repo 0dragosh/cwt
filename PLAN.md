@@ -196,28 +196,73 @@ Phased implementation plan for Claude Code sessions. Each phase is scoped to rou
 
 ---
 
-## Phase 5 — Polish + Hooks + Packaging (stretch)
+## Phase 5 — Hooks, Live State, and Polish
 
-**Goal**: Production-ready CLI with Claude Code hooks integration and Nix packaging.
+**Goal**: cwt reacts to Claude Code events in real-time and is production-ready for daily use.
 
 ### Tasks
 
-1. **Claude Code hooks** (`src/hooks/claude.rs`)
-   - Generate hook config snippet for `.claude/settings.json`:
-     - `WorktreeCreate` → notify cwt state
-     - `WorktreeRemove` → notify cwt state
-     - `Stop` → update session status
-     - `Notification` → update session status to "waiting"
-   - `cwt hooks install` subcommand to add hooks to settings.json
-   - Hooks write to a unix socket or temp file that the TUI polls
-2. **Diff viewer** — scrollable inline diff in inspector (syntax-highlighted if feeling fancy)
-3. **Filter/search** — `/` to fuzzy filter worktree list by name
-4. **Help overlay** — `?` shows all keybindings
-5. **Error handling polish** — user-friendly messages for: not in git repo, not in tmux, claude not found, etc.
-6. **Nix flake** — `flake.nix` with `packages.default` for the binary, devShell with rust toolchain
-7. **README.md** with GIF/screenshot of the TUI in action
-8. **`cwt` as default command** — no subcommand = launch TUI (same as `cwt tui`)
-9. **Mouse support** — click to select worktree, click action buttons
+1. **Unix domain socket listener** (`src/hooks/socket.rs`)
+   - Create socket at `/tmp/cwt-<repo-hash>.sock` on TUI startup
+   - Non-blocking async reader integrated into the tokio event loop
+   - Parse incoming JSON events into typed `HookEvent` enum
+   - Clean up socket on TUI exit
+2. **Hook event model** (`src/hooks/event.rs`)
+   - `HookEvent` enum: WorktreeCreated, WorktreeRemoved, SessionStopped, SessionNotification, SubagentStopped
+   - Each variant carries relevant data (worktree name, session_id, timestamp, etc.)
+   - Serde deserialization from the JSON the hook scripts emit
+3. **Hook script generator** (`src/hooks/install.rs`)
+   - `cwt hooks install` subcommand
+   - Writes small bash+jq scripts to `.cwt/hooks/` (one per event type)
+   - Each script: reads Claude Code JSON from stdin → transforms → writes to the socket via `socat` or `nc -U`
+   - Patches `.claude/settings.json` to register the hooks (merges, doesn't overwrite existing hooks)
+   - `cwt hooks uninstall` to cleanly remove
+4. **Hook-driven state updates** (update `src/app.rs`)
+   - On WorktreeCreated event: add worktree to state, refresh list
+   - On WorktreeRemoved event: remove from state (if not managed by cwt, it was external)
+   - On SessionStopped: flip status to Done, show notification badge
+   - On SessionNotification: flip status to Waiting, show ⚠ badge
+   - Badge count in top bar: "2 waiting"
+5. **Fuzzy filter** — `/` opens a text input that filters worktree list by name (update `src/ui/worktree_list.rs`)
+6. **Help overlay** — `?` renders a full-screen keybinding reference (new `src/ui/help.rs`)
+7. **Mouse support** — click to select worktree in list, click action labels in bottom bar
+8. **Scrollable diff viewer** — inspector diff section scrollable with `j/k` when panel is focused
+9. **Startup checks** (`src/app.rs` init)
+   - Verify: in a git repo, tmux is running, `claude` is on PATH
+   - Friendly error messages with fix suggestions for each case
+10. **`cwt` default = TUI** — no subcommand launches TUI, other subcommands still work (`cwt hooks install`, `cwt list`, etc.)
+11. **Nix flake** — finalize `flake.nix` with crane build, devShell, wrapProgram for git+tmux on PATH
+12. **README.md** — usage guide, GIF recording of the TUI, installation instructions
+
+### Acceptance Criteria
+- Worktrees created via `claude --worktree` outside cwt appear in the list within 1 second
+- Session completion triggers a visible status change without any polling
+- `cwt hooks install` is idempotent and doesn't break existing Claude Code hook config
+- `/` filter narrows the list interactively as you type
+- Running `cwt` outside a git repo shows a clear error, not a panic
+- `nix build` produces a working binary
+
+### File-by-File Implementation Order (Phase 5)
+```
+1. src/hooks/event.rs (event types)
+2. src/hooks/socket.rs (unix socket listener)
+3. src/hooks/install.rs (hook script generation + settings.json patching)
+4. src/hooks/mod.rs
+5. update src/app.rs (socket integration into event loop, startup checks)
+6. update src/ui/worktree_list.rs (fuzzy filter)
+7. src/ui/help.rs (help overlay)
+8. update src/ui/inspector.rs (scrollable diff)
+9. update src/ui/layout.rs (notification badge in top bar)
+10. update src/main.rs (default subcommand, hooks subcommand)
+11. flake.nix (finalize)
+12. README.md
+```
+
+---
+
+## Beyond v0.1
+
+See ROADMAP.md for the full evolution: forest mode (v0.3), agent orchestration (v0.4), PR pipeline (v0.5), per-worktree containers (v0.6), and remote worktrees (v0.7).
 
 ---
 
