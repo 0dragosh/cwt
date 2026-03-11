@@ -2,6 +2,7 @@
 
 mod app;
 mod config;
+mod forest;
 mod git;
 mod hooks;
 mod session;
@@ -60,6 +61,15 @@ enum Commands {
         #[command(subcommand)]
         action: HooksAction,
     },
+    /// Register a git repo for forest (multi-repo) mode
+    AddRepo {
+        /// Path to the git repository
+        path: String,
+    },
+    /// Launch the TUI in forest (multi-repo) mode
+    Forest,
+    /// Show a summary of all registered repos and active sessions
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -75,8 +85,19 @@ enum HooksAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // For hooks status, we don't strictly need to be in a git repo
-    // but for consistency we still check.
+    // Commands that don't require being in a git repo
+    match &cli.command {
+        Some(Commands::AddRepo { path }) => {
+            return cmd_add_repo(path);
+        }
+        Some(Commands::Forest) => {
+            return run_forest_tui();
+        }
+        Some(Commands::Status) => {
+            return cmd_status();
+        }
+        _ => {}
+    }
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
@@ -105,6 +126,10 @@ fn main() -> Result<()> {
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
         Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
+        // Already handled above
+        Some(Commands::AddRepo { .. }) | Some(Commands::Forest) | Some(Commands::Status) => {
+            unreachable!()
+        }
     }
 
     Ok(())
@@ -332,6 +357,158 @@ fn cmd_hooks(repo_root: &std::path::Path, action: HooksAction) -> Result<()> {
             }
         }
     }
+
+    Ok(())
+}
+
+fn cmd_add_repo(path: &str) -> Result<()> {
+    let path = std::path::Path::new(path);
+    match forest::config::add_repo(path)? {
+        true => {
+            let abs = std::fs::canonicalize(path)?;
+            let name = abs
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| abs.to_string_lossy().to_string());
+            println!("Added repo '{}' ({})", name, abs.display());
+
+            // Also update the global index
+            let forest_config = forest::config::load_forest_config()?;
+            let _ = forest::index::refresh_index(&forest_config);
+
+            if let Some(config_path) = forest::config::forest_config_path() {
+                println!("Config: {}", config_path.display());
+            }
+        }
+        false => {
+            let abs = std::fs::canonicalize(path)?;
+            println!("Repo '{}' is already registered", abs.display());
+        }
+    }
+    Ok(())
+}
+
+fn cmd_status() -> Result<()> {
+    let forest_config = forest::config::load_forest_config()?;
+
+    if forest_config.repo.is_empty() {
+        println!("No repos registered. Use `cwt add-repo <path>` to register repos.");
+        return Ok(());
+    }
+
+    // Refresh the index with live data
+    let index = forest::index::refresh_index(&forest_config)?;
+    let (repo_count, total_wt, total_running, total_waiting, total_done) =
+        forest::index::aggregate_stats(&index);
+
+    // Summary line
+    let mut summary_parts: Vec<String> = Vec::new();
+    if total_running > 0 {
+        summary_parts.push(format!("{} running", total_running));
+    }
+    if total_waiting > 0 {
+        summary_parts.push(format!("{} waiting", total_waiting));
+    }
+    if total_done > 0 {
+        summary_parts.push(format!("{} done", total_done));
+    }
+
+    let session_summary = if summary_parts.is_empty() {
+        "no active sessions".to_string()
+    } else {
+        summary_parts.join(", ")
+    };
+
+    println!(
+        "{} repo(s), {} worktree(s), {}",
+        repo_count, total_wt, session_summary
+    );
+    println!();
+
+    // Per-repo details
+    println!(
+        "{:<20} {:<10} {:<10} {:<10} {:<10}",
+        "REPO", "WORKTREES", "RUNNING", "WAITING", "DONE"
+    );
+    println!("{}", "-".repeat(60));
+
+    for entry in index.repos.values() {
+        println!(
+            "{:<20} {:<10} {:<10} {:<10} {:<10}",
+            entry.name,
+            entry.stats.worktree_count,
+            entry.stats.running_sessions,
+            entry.stats.waiting_sessions,
+            entry.stats.done_sessions,
+        );
+    }
+
+    Ok(())
+}
+
+fn run_forest_tui() -> Result<()> {
+    let forest_config = forest::config::load_forest_config()?;
+
+    if forest_config.repo.is_empty() {
+        eprintln!("No repos registered for forest mode.");
+        eprintln!();
+        eprintln!("Register repos first:");
+        eprintln!("  cwt add-repo /path/to/repo1");
+        eprintln!("  cwt add-repo /path/to/repo2");
+        eprintln!();
+        eprintln!("Then run:");
+        eprintln!("  cwt forest");
+        std::process::exit(1);
+    }
+
+    // Startup checks
+    startup_checks()?;
+
+    // Set up terminal
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let mut terminal = ratatui::Terminal::new(backend)?;
+
+    // Create forest app
+    let mut app = app::ForestApp::new(&forest_config)?;
+
+    // Refresh counter for periodic status updates
+    let mut tick_count: u32 = 0;
+
+    // Main loop
+    loop {
+        terminal.draw(|f| app.draw(f))?;
+        app.tick()?;
+
+        if app.should_quit {
+            break;
+        }
+
+        // Refresh session statuses periodically (every ~4 ticks = ~1 second)
+        tick_count = tick_count.wrapping_add(1);
+        if tick_count.is_multiple_of(4) {
+            app.refresh();
+            app.update_inspector();
+        }
+    }
+
+    // Restore terminal
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // Save the global index on exit
+    let _ = forest::index::refresh_index(&forest_config);
 
     Ok(())
 }

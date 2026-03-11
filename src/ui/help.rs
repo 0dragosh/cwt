@@ -8,7 +8,7 @@ use crate::ui::theme;
 
 /// Render the help overlay — a full-screen keybinding reference.
 pub fn render(f: &mut Frame) {
-    let area = centered_rect(60, 26, f.area());
+    let area = centered_rect(60, 28, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -33,7 +33,9 @@ pub fn render(f: &mut Frame) {
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),
             ("k / Up", "Move up / scroll inspector"),
-            ("Tab", "Switch panel focus"),
+            ("Tab", "Switch panel focus (fwd)"),
+            ("Shift+Tab", "Switch panel focus (back)"),
+            ("R", "Switch to repo panel (forest mode)"),
             ("/", "Filter/search worktrees"),
             ("Esc", "Clear filter / close dialog"),
             ("Mouse", "Click to select, scroll to navigate"),
