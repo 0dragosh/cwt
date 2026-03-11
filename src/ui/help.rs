@@ -24,14 +24,15 @@ pub fn render(f: &mut Frame, scroll: u16) {
         (
             "Worktree Actions",
             vec![
-                ("n", "New worktree"),
+                ("n", "New worktree (Enter to quick-create)"),
+                ("Enter", "Launch/resume Claude session"),
                 ("s", "Launch/resume Claude session"),
+                ("e", "Open shell in worktree (tmux tab)"),
                 ("h", "Handoff changes (worktree <-> local)"),
                 ("p", "Promote ephemeral to permanent"),
                 ("d", "Delete worktree (saves snapshot)"),
                 ("g", "Run garbage collection"),
                 ("r", "Restore from snapshot"),
-                ("Enter", "Open shell in worktree (tmux pane)"),
             ],
         ),
         (

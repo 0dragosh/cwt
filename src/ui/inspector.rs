@@ -32,7 +32,7 @@ pub fn render(
     let border_style = if focused {
         theme::title_style()
     } else {
-        Style::default()
+        Style::default().fg(ratatui::style::Color::DarkGray)
     };
 
     let Some(wt) = worktree else {
@@ -40,7 +40,7 @@ pub fn render(
             .title(" Inspector ")
             .borders(Borders::ALL)
             .border_style(border_style);
-        let paragraph = Paragraph::new("No worktree selected")
+        let paragraph = Paragraph::new("  Press n to create a worktree")
             .block(block)
             .style(Style::default().fg(ratatui::style::Color::DarkGray));
         f.render_widget(paragraph, area);

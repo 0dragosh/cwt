@@ -62,6 +62,9 @@ impl Default for SetupConfig {
 pub struct SessionConfig {
     #[serde(default = "default_true")]
     pub auto_launch: bool,
+    /// The command to launch (default: "claude"). Allows using custom wrappers.
+    #[serde(default = "default_session_command")]
+    pub command: String,
     #[serde(default)]
     pub claude_args: Vec<String>,
 }
@@ -70,9 +73,14 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             auto_launch: true,
+            command: default_session_command(),
             claude_args: Vec::new(),
         }
     }
+}
+
+fn default_session_command() -> String {
+    "claude".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,7 +18,8 @@ pub fn title_style() -> Style {
 
 pub fn selected_style() -> Style {
     Style::default()
-        .bg(Color::DarkGray)
+        .bg(Color::Indexed(236)) // subtle dark bg, not as heavy as DarkGray
+        .fg(Color::White)
         .add_modifier(Modifier::BOLD)
 }
 

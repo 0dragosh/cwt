@@ -27,7 +27,7 @@ pub fn render_with_remotes(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                " {} worktree(s) | n:new s:session P:pr S:ship d:delete c:ci ?:help q:quit",
+                " {} worktree(s) | n:new Enter:session e:shell h:handoff d:delete ?:help q:quit",
                 worktree_count
             )),
         ];
