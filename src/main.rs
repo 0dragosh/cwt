@@ -2,6 +2,7 @@
 
 mod app;
 mod config;
+mod env;
 mod forest;
 mod git;
 mod hooks;
@@ -214,6 +215,12 @@ fn run_tui(manager: Manager) -> Result<()> {
             // Update dashboard stats less frequently (every ~4 seconds)
             if tick_count.is_multiple_of(16) {
                 app.update_dashboard();
+                // Update container statuses alongside dashboard
+                app.update_container_statuses();
+            }
+            // Update resource usage less frequently (every ~15 seconds = ~60 ticks)
+            if tick_count.is_multiple_of(60) {
+                app.update_resource_usage();
             }
             // Poll PR/CI status even less frequently (every ~30 seconds = ~120 ticks)
             if tick_count.is_multiple_of(120) {
@@ -268,6 +275,14 @@ fn startup_checks() -> Result<()> {
         eprintln!("warning: gh (GitHub CLI) not found on PATH");
         eprintln!("  Ship pipeline (P/S keys) requires gh.");
         eprintln!("  Install: https://cli.github.com/");
+        eprintln!();
+    }
+
+    // Check container runtime availability (info only)
+    if !crate::env::container::runtime_available() {
+        eprintln!("info: no container runtime found (podman/docker)");
+        eprintln!("  Container environments will fall back to bare setup scripts.");
+        eprintln!("  Install podman: https://podman.io/getting-started/installation");
         eprintln!();
     }
 

@@ -39,6 +39,11 @@ pub fn render(f: &mut Frame) {
             ("S", "Ship it (push + PR + mark shipping)"),
             ("c", "Open CI logs in browser"),
         ]),
+        ("Environments", vec![
+            ("", "Containers auto-managed per worktree"),
+            ("", "Ports auto-assigned (CWT_PORT env var)"),
+            ("", "Resource usage shown in inspector"),
+        ]),
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),
             ("k / Up", "Move up / scroll inspector"),

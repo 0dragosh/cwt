@@ -114,6 +114,35 @@ pub fn render(
             let pr_ci = crate::ui::dialogs::ship::pr_ci_spans(&wt.pr_status, &wt.ci_status);
             line_spans.extend(pr_ci);
 
+            // Add container status icon if present
+            if let Some(ref container) = wt.container {
+                let ctr_icon = container.status.icon();
+                if !ctr_icon.is_empty() {
+                    let ctr_style = match container.status {
+                        crate::env::container::ContainerStatus::Running => {
+                            theme::status_running_style()
+                        }
+                        crate::env::container::ContainerStatus::Building => {
+                            theme::status_waiting_style()
+                        }
+                        crate::env::container::ContainerStatus::Failed => theme::error_style(),
+                        _ => theme::status_idle_style(),
+                    };
+                    line_spans.push(Span::raw(" "));
+                    line_spans.push(Span::styled(ctr_icon, ctr_style));
+                }
+            }
+
+            // Add port info if allocated
+            if let Some(ref port_alloc) = wt.ports {
+                if let Some(primary) = port_alloc.primary_port() {
+                    line_spans.push(Span::styled(
+                        format!(" :{}", primary),
+                        Style::default().fg(Color::Cyan),
+                    ));
+                }
+            }
+
             let line = Line::from(line_spans);
 
             ListItem::new(line)

@@ -4,6 +4,7 @@ use ratatui::widgets::ListState;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::env;
 use crate::git;
 use crate::hooks::event::HookEvent;
 use crate::orchestration;
@@ -60,6 +61,10 @@ pub struct App {
     pub dashboard: orchestration::dashboard::AggregateStats,
     /// Track the areas for mouse click handling.
     pub last_list_area: Option<ratatui::layout::Rect>,
+    /// Port manager for allocating non-conflicting ports per worktree.
+    pub port_manager: env::ports::PortManager,
+    /// Resource warnings from the last check.
+    pub resource_warnings: Vec<env::resources::ResourceWarning>,
 }
 
 impl App {
@@ -69,6 +74,20 @@ impl App {
         if !worktrees.is_empty() {
             list_state.select(Some(0));
         }
+
+        // Rebuild port manager from existing worktree port allocations
+        let existing_ports: Vec<env::ports::PortAllocation> = worktrees
+            .iter()
+            .filter_map(|wt| wt.ports.clone())
+            .collect();
+        let port_manager = if existing_ports.is_empty() {
+            env::ports::PortManager::new(
+                manager.config.container.app_base_port,
+                manager.config.container.db_base_port,
+            )
+        } else {
+            env::ports::PortManager::from_existing(existing_ports)
+        };
 
         let mut app = Self {
             manager,
@@ -86,6 +105,8 @@ impl App {
             done_count: 0,
             dashboard: orchestration::dashboard::AggregateStats::default(),
             last_list_area: None,
+            port_manager,
+            resource_warnings: Vec::new(),
         };
 
         app.update_inspector();
@@ -639,7 +660,9 @@ impl App {
             match self.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
             {
                 Ok(wt) => {
-                    self.status_message = format!("Created worktree '{}'", wt.name);
+                    let wt_name = wt.name.clone();
+                    self.setup_worktree_env(&wt_name);
+                    self.status_message = format!("Created worktree '{}'", wt_name);
                     self.refresh();
                     self.update_inspector();
                 }
@@ -673,6 +696,9 @@ impl App {
 
         let dialog_clone = dialog.clone();
         if dialog_clone.confirmed {
+            // Tear down container and release ports before deleting
+            self.teardown_worktree_env(&dialog_clone.worktree_name);
+
             match self.manager.delete(&dialog_clone.worktree_name) {
                 Ok(()) => {
                     self.status_message = format!(
@@ -763,6 +789,11 @@ impl App {
 
         let dialog_clone = dialog.clone();
         if dialog_clone.confirmed && !dialog_clone.to_prune.is_empty() {
+            // Tear down containers and release ports for pruned worktrees
+            for name in &dialog_clone.to_prune {
+                self.teardown_worktree_env(name);
+            }
+
             match self.manager.gc_execute(&dialog_clone.to_prune) {
                 Ok(deleted) => {
                     self.status_message =
@@ -1414,6 +1445,238 @@ impl App {
         Ok(())
     }
 
+    /// Set up environment (container, ports) for a newly created worktree.
+    fn setup_worktree_env(&mut self, worktree_name: &str) {
+        let config = &self.manager.config.container;
+
+        // Allocate ports if auto_ports is enabled
+        if config.auto_ports {
+            let port_names: Vec<&str> = config.port_names.iter().map(|s| s.as_str()).collect();
+            let port_names_ref = if port_names.is_empty() {
+                vec!["app"]
+            } else {
+                port_names
+            };
+
+            match self.port_manager.allocate(worktree_name, &port_names_ref) {
+                Ok(alloc) => {
+                    // Save port allocation to state
+                    if let Ok(mut state) = self.manager.load_state() {
+                        if let Some(stored) = state.worktrees.get_mut(worktree_name) {
+                            stored.ports = Some(alloc.clone());
+                        }
+                        let _ = self.manager.save_state(&state);
+                    }
+                }
+                Err(e) => {
+                    self.status_message =
+                        format!("Port allocation warning: {}", e);
+                }
+            }
+        }
+
+        // Set up container if container support is enabled
+        if !config.enabled {
+            return;
+        }
+
+        // Find the worktree to get its path
+        let wt = match self.worktrees.iter().find(|wt| wt.name == worktree_name) {
+            Some(wt) => wt.clone(),
+            None => return,
+        };
+        let wt_abs = self.manager.worktree_abs_path(&wt);
+
+        // Determine the containerfile to use
+        let containerfile = if !config.containerfile.is_empty() {
+            Some(config.containerfile.clone())
+        } else {
+            // Auto-detect: check for devcontainer.json first, then Containerfile
+            if let Some(dc_path) = env::devcontainer::find_devcontainer(&wt_abs) {
+                if let Ok(dc_config) = env::devcontainer::parse_devcontainer(&dc_path) {
+                    if let Some((dockerfile, _context)) =
+                        env::devcontainer::resolve_containerfile(&dc_config, &dc_path)
+                    {
+                        Some(dockerfile)
+                    } else if dc_config.image.is_some() {
+                        // Has an image but no Dockerfile -- skip container build
+                        None
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                env::devcontainer::find_containerfile(&wt_abs)
+                    .map(|p| p.to_string_lossy().to_string())
+            }
+        };
+
+        let Some(containerfile) = containerfile else {
+            return;
+        };
+
+        // Gather env vars (ports + devcontainer env)
+        let mut env_vars: Vec<(String, String)> = Vec::new();
+        if let Some(alloc) = self.port_manager.get(worktree_name) {
+            env_vars.extend(alloc.env_vars());
+        }
+
+        // Port mappings
+        let port_mappings: Vec<(u16, u16)> = self
+            .port_manager
+            .get(worktree_name)
+            .map(|alloc| alloc.ports.values().map(|&p| (p, p)).collect())
+            .unwrap_or_default();
+
+        // Build and run the container
+        match env::container::setup_container(
+            worktree_name,
+            &wt_abs,
+            &containerfile,
+            &env_vars,
+            &port_mappings,
+        ) {
+            Ok(container_info) => {
+                // Save container info to state
+                if let Ok(mut state) = self.manager.load_state() {
+                    if let Some(stored) = state.worktrees.get_mut(worktree_name) {
+                        stored.container = Some(container_info);
+                    }
+                    let _ = self.manager.save_state(&state);
+                }
+            }
+            Err(e) => {
+                self.status_message = format!(
+                    "Container setup warning for '{}': {} (falling back to bare worktree)",
+                    worktree_name, e
+                );
+            }
+        }
+    }
+
+    /// Tear down environment (container, ports) for a worktree being deleted.
+    fn teardown_worktree_env(&mut self, worktree_name: &str) {
+        // Tear down container if present
+        if let Some(wt) = self.worktrees.iter().find(|wt| wt.name == worktree_name) {
+            if let Some(ref container) = wt.container {
+                if let Err(e) = env::container::teardown_container(container) {
+                    // Non-fatal: log warning but continue with deletion
+                    self.status_message = format!(
+                        "Container teardown warning for '{}': {}",
+                        worktree_name, e
+                    );
+                }
+            }
+        }
+
+        // Release ports
+        self.port_manager.release(worktree_name);
+    }
+
+    /// Update resource usage for the currently selected worktree.
+    /// Called periodically from the refresh loop.
+    pub fn update_resource_usage(&mut self) {
+        if !self.manager.config.container.track_resources {
+            return;
+        }
+
+        let mut usage_data: Vec<(String, env::resources::ResourceUsage)> = Vec::new();
+
+        for wt in &self.worktrees {
+            let wt_abs = self.manager.worktree_abs_path(wt);
+            let container_id = wt.container_id();
+            let runtime = wt
+                .container
+                .as_ref()
+                .map(|c| &c.runtime)
+                .unwrap_or(&env::container::ContainerRuntime::None);
+
+            let usage = env::resources::get_resource_usage(&wt_abs, container_id, runtime);
+            usage_data.push((wt.name.clone(), usage));
+        }
+
+        // Check for warnings
+        self.resource_warnings = env::resources::check_warnings(&usage_data);
+
+        // Update worktree resource_usage fields in state
+        if let Ok(mut state) = self.manager.load_state() {
+            for (name, usage) in &usage_data {
+                if let Some(stored) = state.worktrees.get_mut(name) {
+                    stored.resource_usage = Some(usage.clone());
+                }
+            }
+            let _ = self.manager.save_state(&state);
+        }
+
+        // Update local worktree list
+        for (name, usage) in usage_data {
+            if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == name) {
+                wt.resource_usage = Some(usage);
+            }
+        }
+
+        // Show the most critical warning in the status bar
+        if let Some(warning) = self.resource_warnings.first() {
+            if warning.severity == env::resources::WarningSeverity::Critical {
+                self.status_message = format!(
+                    "WARNING: {} -- {}",
+                    warning.worktree_name, warning.message
+                );
+            }
+        }
+    }
+
+    /// Update container statuses for worktrees with containers.
+    pub fn update_container_statuses(&mut self) {
+        let mut updates: Vec<(String, env::container::ContainerStatus)> = Vec::new();
+
+        for wt in &self.worktrees {
+            if let Some(ref container) = wt.container {
+                if container.status == env::container::ContainerStatus::None {
+                    continue;
+                }
+                let cid = container
+                    .container_id
+                    .as_deref()
+                    .or(container.container_name.as_deref());
+                if let Some(cid) = cid {
+                    let new_status =
+                        env::container::inspect_container_status(&container.runtime, cid);
+                    if new_status != container.status {
+                        updates.push((wt.name.clone(), new_status));
+                    }
+                }
+            }
+        }
+
+        if updates.is_empty() {
+            return;
+        }
+
+        // Persist changes
+        if let Ok(mut state) = self.manager.load_state() {
+            for (name, status) in &updates {
+                if let Some(stored) = state.worktrees.get_mut(name) {
+                    if let Some(ref mut container) = stored.container {
+                        container.status = status.clone();
+                    }
+                }
+            }
+            let _ = self.manager.save_state(&state);
+        }
+
+        // Update local worktree list
+        for (name, status) in updates {
+            if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == name) {
+                if let Some(ref mut container) = wt.container {
+                    container.status = status;
+                }
+            }
+        }
+    }
+
     /// Poll PR/CI status for worktrees that have open PRs.
     /// Called periodically from the refresh loop.
     pub fn poll_ship_status(&mut self) {
@@ -1474,6 +1737,7 @@ impl App {
         for name in merged_worktrees {
             self.status_message =
                 format!("PR merged for '{}' -- auto-cleaning up", name);
+            self.teardown_worktree_env(&name);
             match self.manager.delete(&name) {
                 Ok(()) => {
                     self.status_message =

@@ -12,6 +12,8 @@ pub struct Config {
     pub handoff: HandoffConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub container: ContainerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,4 +126,71 @@ fn default_handoff_method() -> String {
 
 fn default_theme() -> String {
     "default".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerConfig {
+    /// Enable container support (auto-detect Containerfile/devcontainer.json).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Preferred container runtime: "podman", "docker", or "auto".
+    #[serde(default = "default_container_runtime")]
+    pub runtime: String,
+    /// Path to Containerfile (relative to repo root). Overrides auto-detection.
+    #[serde(default)]
+    pub containerfile: String,
+    /// Auto-assign ports per worktree.
+    #[serde(default = "default_true")]
+    pub auto_ports: bool,
+    /// Base port for app allocations.
+    #[serde(default = "default_app_base_port")]
+    pub app_base_port: u16,
+    /// Base port for database allocations.
+    #[serde(default = "default_db_base_port")]
+    pub db_base_port: u16,
+    /// Port names to auto-allocate (e.g., ["app", "db"]).
+    #[serde(default = "default_port_names")]
+    pub port_names: Vec<String>,
+    /// Disk usage warning threshold in bytes (default: 1 GiB).
+    #[serde(default = "default_disk_warning_bytes")]
+    pub disk_warning_bytes: u64,
+    /// Track resource usage periodically.
+    #[serde(default)]
+    pub track_resources: bool,
+}
+
+impl Default for ContainerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            runtime: default_container_runtime(),
+            containerfile: String::new(),
+            auto_ports: true,
+            app_base_port: default_app_base_port(),
+            db_base_port: default_db_base_port(),
+            port_names: default_port_names(),
+            disk_warning_bytes: default_disk_warning_bytes(),
+            track_resources: false,
+        }
+    }
+}
+
+fn default_container_runtime() -> String {
+    "auto".to_string()
+}
+
+fn default_app_base_port() -> u16 {
+    3000
+}
+
+fn default_db_base_port() -> u16 {
+    5432
+}
+
+fn default_port_names() -> Vec<String> {
+    vec!["app".to_string()]
+}
+
+fn default_disk_warning_bytes() -> u64 {
+    1_073_741_824 // 1 GiB
 }

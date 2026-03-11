@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::env::container::ContainerStatus;
 use crate::session::transcript::TranscriptUsage;
 use crate::ship::pr::{CiStatus, PrStatus};
 use crate::ui::theme;
@@ -62,7 +63,7 @@ pub fn render(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Calculate dynamic metadata height: base 7 lines + optional session/usage/PR lines
+    // Calculate dynamic metadata height: base 7 lines + optional session/usage/PR/container lines
     let mut meta_height: u16 = 7;
     if wt.tmux_pane.is_some() {
         meta_height += 1; // pane line
@@ -78,6 +79,20 @@ pub fn render(
     }
     if wt.ci_status != CiStatus::None {
         meta_height += 1; // CI line
+    }
+    if wt.container.is_some() {
+        meta_height += 1; // container line
+    }
+    if wt.ports.is_some() {
+        meta_height += 1; // ports line
+    }
+    if let Some(ref res) = wt.resource_usage {
+        if res.disk_bytes > 0 {
+            meta_height += 1; // disk line
+        }
+        if res.container_cpu_percent > 0.0 || res.container_memory_bytes > 0 {
+            meta_height += 1; // container resource line
+        }
     }
 
     let chunks = Layout::default()
@@ -198,6 +213,60 @@ pub fn render(
             Span::styled("CI:        ", theme::help_key_style()),
             Span::styled(ci_label, ci_style),
         ]));
+    }
+
+    // Show container info if available
+    if let Some(ref container) = wt.container {
+        let ctr_label = container.status.label();
+        let ctr_style = match container.status {
+            ContainerStatus::Running => theme::status_running_style(),
+            ContainerStatus::Building => theme::status_waiting_style(),
+            ContainerStatus::Stopped => theme::status_idle_style(),
+            ContainerStatus::Failed => theme::error_style(),
+            ContainerStatus::None => Style::default(),
+        };
+        let ctr_detail = container
+            .container_name
+            .as_deref()
+            .or(container.container_id.as_deref())
+            .unwrap_or("(unknown)");
+        meta_lines.push(Line::from(vec![
+            Span::styled("Container: ", theme::help_key_style()),
+            Span::styled(ctr_label, ctr_style),
+            Span::styled(format!("  {}", ctr_detail), Style::default().fg(ratatui::style::Color::DarkGray)),
+        ]));
+    }
+
+    // Show port map if available
+    if let Some(ref port_alloc) = wt.ports {
+        let port_map = port_alloc.format_port_map();
+        meta_lines.push(Line::from(vec![
+            Span::styled("Ports:     ", theme::help_key_style()),
+            Span::raw(port_map),
+        ]));
+    }
+
+    // Show resource usage if available
+    if let Some(ref res) = wt.resource_usage {
+        if res.disk_bytes > 0 {
+            meta_lines.push(Line::from(vec![
+                Span::styled("Disk:      ", theme::help_key_style()),
+                Span::raw(res.format_disk()),
+            ]));
+        }
+        if res.container_cpu_percent > 0.0 || res.container_memory_bytes > 0 {
+            let mut parts = Vec::new();
+            if res.container_cpu_percent > 0.0 {
+                parts.push(format!("CPU: {}", res.format_container_cpu()));
+            }
+            if res.container_memory_bytes > 0 {
+                parts.push(format!("Mem: {}", res.format_container_memory()));
+            }
+            meta_lines.push(Line::from(vec![
+                Span::styled("Resources: ", theme::help_key_style()),
+                Span::raw(parts.join("  ")),
+            ]));
+        }
     }
 
     let meta = Paragraph::new(meta_lines);
