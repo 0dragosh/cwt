@@ -64,6 +64,12 @@ pub struct Worktree {
     /// Resource usage snapshot (disk, CPU, memory).
     #[serde(default)]
     pub resource_usage: Option<ResourceUsage>,
+    /// If set, this worktree lives on a remote host (value is the host name).
+    #[serde(default)]
+    pub remote_host: Option<String>,
+    /// Path on the remote host (absolute).
+    #[serde(default)]
+    pub remote_path: Option<String>,
 }
 
 impl Worktree {
@@ -93,7 +99,27 @@ impl Worktree {
             container: None,
             ports: None,
             resource_usage: None,
+            remote_host: None,
+            remote_path: None,
         }
+    }
+
+    /// Create a new worktree that lives on a remote host.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_remote(
+        name: String,
+        path: PathBuf,
+        branch: String,
+        base_branch: String,
+        base_commit: String,
+        lifecycle: Lifecycle,
+        remote_host: String,
+        remote_path: String,
+    ) -> Self {
+        let mut wt = Self::new(name, path, branch, base_branch, base_commit, lifecycle);
+        wt.remote_host = Some(remote_host);
+        wt.remote_path = Some(remote_path);
+        wt
     }
 
     pub fn is_ephemeral(&self) -> bool {
@@ -111,6 +137,11 @@ impl Worktree {
     /// Whether this worktree has an associated container.
     pub fn has_container(&self) -> bool {
         self.container.is_some()
+    }
+
+    /// Whether this worktree is on a remote host.
+    pub fn is_remote(&self) -> bool {
+        self.remote_host.is_some()
     }
 
     /// Get the container ID if available.

@@ -108,6 +108,15 @@ pub fn render(
                 lifecycle_icon,
             ];
             line_spans.extend(name_span);
+
+            // Show remote host indicator if this is a remote worktree
+            if let Some(ref host_name) = wt.remote_host {
+                line_spans.push(Span::styled(
+                    format!(" [{}]", host_name),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+
             line_spans.push(branch);
 
             // Add PR/CI status icons

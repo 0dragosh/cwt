@@ -7,6 +7,7 @@ mod forest;
 mod git;
 mod hooks;
 mod orchestration;
+mod remote;
 mod session;
 mod ship;
 mod state;
@@ -40,6 +41,9 @@ enum Commands {
         /// Carry uncommitted local changes into the new worktree
         #[arg(short, long)]
         carry: bool,
+        /// Create worktree on a remote host (by name from config)
+        #[arg(short, long)]
+        remote: Option<String>,
     },
     /// Delete a worktree (saves a snapshot first)
     Delete {
@@ -145,8 +149,12 @@ fn main() -> Result<()> {
     match cli.command {
         None | Some(Commands::Tui) => run_tui(manager)?,
         Some(Commands::List) => cmd_list(&manager)?,
-        Some(Commands::Create { name, base, carry }) => {
-            cmd_create(&manager, name.as_deref(), &base, carry)?
+        Some(Commands::Create { name, base, carry, remote }) => {
+            if let Some(ref remote_name) = remote {
+                cmd_create_remote(&manager, name.as_deref(), &base, remote_name)?
+            } else {
+                cmd_create(&manager, name.as_deref(), &base, carry)?
+            }
         }
         Some(Commands::Delete { name }) => cmd_delete(&manager, &name)?,
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
@@ -226,6 +234,11 @@ fn run_tui(manager: Manager) -> Result<()> {
             if tick_count.is_multiple_of(120) {
                 app.poll_ship_status();
             }
+            // Poll remote host statuses infrequently (every ~60 seconds = ~240 ticks)
+            // This is latency-aware: we batch remote checks to avoid polling on every tick
+            if tick_count.is_multiple_of(240) {
+                app.poll_remote_statuses();
+            }
         }
     }
 
@@ -286,6 +299,13 @@ fn startup_checks() -> Result<()> {
         eprintln!();
     }
 
+    // Check SSH availability (info only, needed for remote worktrees)
+    if which::which("ssh").is_err() {
+        eprintln!("info: ssh not found on PATH");
+        eprintln!("  Remote worktree support requires OpenSSH.");
+        eprintln!();
+    }
+
     Ok(())
 }
 
@@ -320,6 +340,68 @@ fn cmd_create(manager: &Manager, name: Option<&str>, base: &str, carry: bool) ->
     println!("  Path:   {}", abs_path.display());
     println!("  Branch: {}", wt.branch);
     println!("  Base:   {} ({})", wt.base_branch, &wt.base_commit[..8.min(wt.base_commit.len())]);
+    Ok(())
+}
+
+fn cmd_create_remote(
+    manager: &Manager,
+    name: Option<&str>,
+    base: &str,
+    remote_name: &str,
+) -> Result<()> {
+    // Find the remote host in config
+    let host = manager
+        .config
+        .remote
+        .iter()
+        .find(|r| r.name == remote_name)
+        .cloned()
+        .with_context(|| format!("remote host '{}' not found in config", remote_name))?;
+
+    let wt_name = match name {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ => worktree::slug::generate_slug(),
+    };
+
+    let repo_name = remote::sync::repo_name_from_path(&manager.repo_root);
+
+    // Ensure remote has the repo
+    let repo_url = remote::sync::get_repo_remote_url(&manager.repo_root)?;
+    println!("Ensuring repo '{}' exists on '{}'...", repo_name, host.name);
+    host.ensure_repo(&repo_url, &repo_name)?;
+
+    // Get base commit
+    let base_commit = host.head_commit(&repo_name)?;
+
+    // Create worktree on remote
+    let branch_name = format!("wt/{}", wt_name);
+    println!("Creating worktree '{}' on '{}'...", wt_name, host.name);
+    let remote_path =
+        host.create_worktree(&repo_name, &wt_name, &branch_name, base)?;
+
+    // Register in local state
+    let wt_rel_path = std::path::PathBuf::from(&manager.config.worktree.dir).join(&wt_name);
+    let wt = crate::worktree::model::Worktree::new_remote(
+        wt_name.clone(),
+        wt_rel_path,
+        branch_name.clone(),
+        base.to_string(),
+        base_commit.clone(),
+        crate::worktree::Lifecycle::Ephemeral,
+        host.name.clone(),
+        remote_path.clone(),
+    );
+
+    let mut state = manager.load_state()?;
+    state.worktrees.insert(wt_name.clone(), wt);
+    manager.save_state(&state)?;
+
+    println!("Created remote worktree '{}'", wt_name);
+    println!("  Host:   {} ({})", host.name, host.host);
+    println!("  Path:   {}", remote_path);
+    println!("  Branch: {}", branch_name);
+    println!("  Base:   {} ({})", base, &base_commit[..8.min(base_commit.len())]);
+
     Ok(())
 }
 

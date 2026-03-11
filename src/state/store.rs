@@ -87,7 +87,12 @@ impl StateStore {
             .collect();
 
         // Remove entries whose paths no longer exist in git worktree list
+        // Note: remote worktrees don't have local git paths, so always retain them
         state.worktrees.retain(|_name, wt| {
+            // Remote worktrees are not in the local git worktree list
+            if wt.remote_host.is_some() {
+                return true;
+            }
             let abs_path = if wt.path.is_relative() {
                 state.repo_root.join(&wt.path)
             } else {

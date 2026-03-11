@@ -63,8 +63,11 @@ pub fn render(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Calculate dynamic metadata height: base 7 lines + optional session/usage/PR/container lines
+    // Calculate dynamic metadata height: base 7 lines + optional session/usage/PR/container/remote lines
     let mut meta_height: u16 = 7;
+    if wt.remote_host.is_some() {
+        meta_height += 1; // remote host line
+    }
     if wt.tmux_pane.is_some() {
         meta_height += 1; // pane line
     }
@@ -144,6 +147,19 @@ pub fn render(
             Span::raw(wt.path.display().to_string()),
         ]),
     ];
+
+    // Show remote host info if this is a remote worktree
+    if let Some(ref host_name) = wt.remote_host {
+        let remote_detail = if let Some(ref rpath) = wt.remote_path {
+            format!("{} ({})", host_name, rpath)
+        } else {
+            host_name.clone()
+        };
+        meta_lines.push(Line::from(vec![
+            Span::styled("Remote:    ", theme::help_key_style()),
+            Span::styled(remote_detail, Style::default().fg(ratatui::style::Color::Magenta)),
+        ]));
+    }
 
     // Show pane info if a session has been launched
     if let Some(ref pane_id) = wt.tmux_pane {
