@@ -30,11 +30,10 @@
             version = "0.1.0";
             src = craneLib.cleanCargoSource ./.;
 
-            nativeBuildInputs = with pkgs; [ pkg-config ];
+            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
             buildInputs = with pkgs; [ ]
               ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-                pkgs.darwin.apple_sdk.frameworks.Security
-                pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+                pkgs.apple-sdk_15
               ];
 
             # Runtime deps that should be on PATH
@@ -42,8 +41,6 @@
               wrapProgram $out/bin/cwt \
                 --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.tmux ]}
             '';
-
-            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
           };
         in
         {
