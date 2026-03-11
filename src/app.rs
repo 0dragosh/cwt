@@ -68,6 +68,8 @@ pub struct App {
     pub resource_warnings: Vec<env::resources::ResourceWarning>,
     /// Cached status of remote hosts (updated periodically, not every tick).
     pub remote_statuses: Vec<remote::host::RemoteHostStatus>,
+    /// Scroll offset for the help overlay.
+    pub help_scroll: u16,
 }
 
 impl App {
@@ -119,6 +121,7 @@ impl App {
             port_manager,
             resource_warnings: Vec::new(),
             remote_statuses,
+            help_scroll: 0,
         };
 
         app.update_inspector();
@@ -453,7 +456,7 @@ impl App {
             ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
             ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
             ActiveDialog::Ship(d) => ui::dialogs::ship::render(frame, d),
-            ActiveDialog::Help => ui::help::render(frame),
+            ActiveDialog::Help => ui::help::render(frame, self.help_scroll),
         }
     }
 
@@ -532,8 +535,18 @@ impl App {
         match &self.dialog {
             ActiveDialog::None => self.handle_global_key(key),
             ActiveDialog::Help => {
-                // Any key dismisses help
-                self.dialog = ActiveDialog::None;
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.help_scroll = self.help_scroll.saturating_add(1);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.help_scroll = self.help_scroll.saturating_sub(1);
+                    }
+                    _ => {
+                        self.dialog = ActiveDialog::None;
+                        self.help_scroll = 0;
+                    }
+                }
                 Ok(())
             }
             ActiveDialog::Create(_) => self.handle_create_key(key),
@@ -1087,10 +1100,13 @@ impl App {
 
         let name = wt.name.clone();
         match self.manager.promote(&name) {
-            Ok(()) => {
+            Ok(true) => {
                 self.status_message = format!("Promoted '{}' to permanent", name);
                 self.refresh();
                 self.update_inspector();
+            }
+            Ok(false) => {
+                self.status_message = format!("'{}' is already permanent", name);
             }
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
@@ -1567,8 +1583,8 @@ impl App {
     fn setup_worktree_env(&mut self, worktree_name: &str) {
         let config = &self.manager.config.container;
 
-        // Allocate ports if auto_ports is enabled
-        if config.auto_ports {
+        // Allocate ports if container support is enabled and auto_ports is on
+        if config.enabled && config.auto_ports {
             let port_names: Vec<&str> = config.port_names.iter().map(|s| s.as_str()).collect();
             let port_names_ref = if port_names.is_empty() {
                 vec!["app"]
@@ -2231,6 +2247,8 @@ pub struct ForestApp {
     /// Track the areas for mouse click handling.
     pub last_repo_list_area: Option<ratatui::layout::Rect>,
     pub last_wt_list_area: Option<ratatui::layout::Rect>,
+    /// Scroll offset for the help overlay.
+    pub help_scroll: u16,
 }
 
 impl ForestApp {
@@ -2284,6 +2302,7 @@ impl ForestApp {
             total_done: 0,
             last_repo_list_area: None,
             last_wt_list_area: None,
+            help_scroll: 0,
         };
 
         app.update_aggregate_counts();
@@ -2538,13 +2557,16 @@ impl ForestApp {
             self.inspector_scroll,
         );
 
-        // Render the status bar
-        let total_wt: usize = self.repos.iter().map(|r| r.worktrees.len()).sum();
+        // Render the status bar — show selected repo's worktree count
+        let repo_wt_count = selected_idx
+            .and_then(|idx| self.repos.get(idx))
+            .map(|r| r.worktrees.len())
+            .unwrap_or(0);
         ui::status_bar::render(
             frame,
             status_area,
             &self.status_message,
-            total_wt,
+            repo_wt_count,
         );
 
         // Render active dialog on top
@@ -2558,7 +2580,7 @@ impl ForestApp {
             ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
             ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
             ActiveDialog::Ship(d) => ui::dialogs::ship::render(frame, d),
-            ActiveDialog::Help => ui::help::render(frame),
+            ActiveDialog::Help => ui::help::render(frame, self.help_scroll),
         }
     }
 
@@ -2659,7 +2681,18 @@ impl ForestApp {
         match &self.dialog {
             ActiveDialog::None => self.handle_global_key(key),
             ActiveDialog::Help => {
-                self.dialog = ActiveDialog::None;
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.help_scroll = self.help_scroll.saturating_add(1);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.help_scroll = self.help_scroll.saturating_sub(1);
+                    }
+                    _ => {
+                        self.dialog = ActiveDialog::None;
+                        self.help_scroll = 0;
+                    }
+                }
                 Ok(())
             }
             ActiveDialog::Create(_) => self.handle_create_key(key),
@@ -3327,10 +3360,13 @@ impl ForestApp {
 
         let name = wt.name.clone();
         match repo.manager.promote(&name) {
-            Ok(()) => {
+            Ok(true) => {
                 self.status_message = format!("Promoted '{}' to permanent", name);
                 self.refresh();
                 self.update_inspector();
+            }
+            Ok(false) => {
+                self.status_message = format!("'{}' is already permanent", name);
             }
             Err(e) => {
                 self.status_message = format!("Error: {}", e);

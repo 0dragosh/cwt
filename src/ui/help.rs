@@ -6,13 +6,14 @@ use ratatui::Frame;
 
 use crate::ui::theme;
 
-/// Render the help overlay — a full-screen keybinding reference.
-pub fn render(f: &mut Frame) {
-    let area = centered_rect(60, 40, f.area());
+/// Render the help overlay — a scrollable keybinding reference.
+pub fn render(f: &mut Frame, scroll: u16) {
+    let height = f.area().height.saturating_sub(2);
+    let area = centered_rect(80, height, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" cwt Keybindings — press any key to close ")
+        .title(" cwt Keybindings — j/k scroll, any other key to close ")
         .borders(Borders::ALL)
         .border_style(theme::dialog_border_style());
 
@@ -38,17 +39,6 @@ pub fn render(f: &mut Frame) {
             ("P", "Create PR (push + gh pr create)"),
             ("S", "Ship it (push + PR + mark shipping)"),
             ("c", "Open CI logs in browser"),
-        ]),
-        ("Environments", vec![
-            ("", "Containers auto-managed per worktree"),
-            ("", "Ports auto-assigned (CWT_PORT env var)"),
-            ("", "Resource usage shown in inspector"),
-        ]),
-        ("Remote", vec![
-            ("", "Configure [[remote]] in .cwt/config.toml"),
-            ("", "Select host in create dialog (n)"),
-            ("", "Sessions run via SSH + remote tmux"),
-            ("", "Remote worktrees shown with [host]"),
         ]),
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),
@@ -91,7 +81,7 @@ pub fn render(f: &mut Frame) {
         lines.push(Line::default());
     }
 
-    let help = Paragraph::new(lines);
+    let help = Paragraph::new(lines).scroll((scroll, 0));
     f.render_widget(help, inner);
 }
 
