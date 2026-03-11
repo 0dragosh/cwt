@@ -107,9 +107,9 @@ fn run_tui(manager: Manager) -> Result<()> {
             break;
         }
 
-        // Refresh session statuses periodically (every ~20 ticks = ~5 seconds)
+        // Refresh session statuses periodically (every ~4 ticks = ~1 second)
         tick_count = tick_count.wrapping_add(1);
-        if tick_count.is_multiple_of(20) {
+        if tick_count.is_multiple_of(4) {
             app.refresh();
             app.update_inspector();
         }

@@ -70,10 +70,27 @@ impl App {
     /// Refresh worktree list and update session statuses.
     pub fn refresh(&mut self) {
         if let Ok(worktrees) = self.manager.list() {
-            // Update session statuses
             let mut updated = worktrees;
             for wt in &mut updated {
-                wt.status = session::tracker::check_status(wt.tmux_pane.as_deref());
+                let new_status = session::tracker::check_status(wt.tmux_pane.as_deref());
+
+                // If session just finished (was Running, now Done), clear the pane
+                // but preserve last_session_id for potential resume
+                if wt.status == WorktreeStatus::Running && new_status == WorktreeStatus::Done {
+                    // Try to capture the session ID before clearing
+                    if wt.last_session_id.is_none() {
+                        let wt_abs = self.manager.worktree_abs_path(wt);
+                        if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
+                            if let Ok(Some(sid)) =
+                                session::tracker::find_latest_session_id(&dir)
+                            {
+                                wt.last_session_id = Some(sid);
+                            }
+                        }
+                    }
+                }
+
+                wt.status = new_status;
             }
             self.worktrees = updated;
 
@@ -83,6 +100,9 @@ impl App {
                     if let Some(stored) = state.worktrees.get_mut(&wt.name) {
                         stored.status = wt.status.clone();
                         stored.tmux_pane = wt.tmux_pane.clone();
+                        if wt.last_session_id.is_some() {
+                            stored.last_session_id = wt.last_session_id.clone();
+                        }
                     }
                 }
                 let _ = self.manager.save_state(&state);
@@ -116,19 +136,24 @@ impl App {
                 .map(|s| s.raw)
                 .unwrap_or_default();
 
-            let last_message = session::tracker::find_project_dir(&wt_abs)
+            let project_dir = session::tracker::find_project_dir(&wt_abs)
                 .ok()
-                .flatten()
-                .and_then(|dir| {
-                    session::transcript::read_last_messages(&dir, 1)
-                        .ok()
-                        .and_then(|msgs| msgs.last().map(|m| m.content.clone()))
-                })
+                .flatten();
+
+            let transcript_info = project_dir
+                .as_ref()
+                .and_then(|dir| session::transcript::read_transcript_info(dir, 1).ok())
                 .unwrap_or_default();
+
+            let session_id = project_dir
+                .as_ref()
+                .and_then(|dir| session::tracker::find_latest_session_id(dir).ok().flatten());
 
             ui::inspector::InspectorInfo {
                 diff_stat_text,
-                last_message,
+                last_message: transcript_info.last_message,
+                usage: transcript_info.usage,
+                session_id,
             }
         } else {
             ui::inspector::InspectorInfo::default()
@@ -587,26 +612,57 @@ impl App {
                         return Ok(());
                     }
                     Err(_) => {
-                        // Pane gone, launch new one
+                        // Pane gone, fall through to launch/resume
                     }
                 }
             }
         }
 
         let wt_abs = self.manager.worktree_abs_path(&wt);
-        match session::launcher::launch_session(&wt, &wt_abs, &self.manager.config.session) {
+
+        // Check if we have a previous session ID to resume
+        let session_id = wt.last_session_id.clone().or_else(|| {
+            session::tracker::find_project_dir(&wt_abs)
+                .ok()
+                .flatten()
+                .and_then(|dir| {
+                    session::tracker::find_latest_session_id(&dir).ok().flatten()
+                })
+        });
+
+        let launch_result = if let Some(ref sid) = session_id {
+            // Try to resume a previous session
+            session::launcher::resume_session(
+                &wt,
+                &wt_abs,
+                sid,
+                &self.manager.config.session,
+            )
+        } else {
+            // Fresh launch
+            session::launcher::launch_session(&wt, &wt_abs, &self.manager.config.session)
+        };
+
+        match launch_result {
             Ok(pane_id) => {
-                // Update state with pane ID
+                let action = if session_id.is_some() { "Resumed" } else { "Launched" };
+
+                // Update state with pane ID and session ID
                 if let Ok(mut state) = self.manager.load_state() {
                     if let Some(stored) = state.worktrees.get_mut(&wt.name) {
                         stored.tmux_pane = Some(pane_id.clone());
                         stored.status = WorktreeStatus::Running;
+                        if session_id.is_some() {
+                            stored.last_session_id = session_id.clone();
+                        }
                     }
                     let _ = self.manager.save_state(&state);
                 }
 
-                self.status_message = format!("Launched session for '{}' ({})", wt.name, pane_id);
+                self.status_message =
+                    format!("{} session for '{}' ({})", action, wt.name, pane_id);
                 self.refresh();
+                self.update_inspector();
             }
             Err(e) => {
                 self.status_message = format!("Session error: {}", e);
