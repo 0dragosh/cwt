@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::remote::host::RemoteHost;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -14,6 +16,9 @@ pub struct Config {
     pub ui: UiConfig,
     #[serde(default)]
     pub container: ContainerConfig,
+    /// Registered remote hosts for running worktrees remotely.
+    #[serde(default)]
+    pub remote: Vec<RemoteHost>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -44,6 +44,12 @@ pub fn render(f: &mut Frame) {
             ("", "Ports auto-assigned (CWT_PORT env var)"),
             ("", "Resource usage shown in inspector"),
         ]),
+        ("Remote", vec![
+            ("", "Configure [[remote]] in .cwt/config.toml"),
+            ("", "Select host in create dialog (n)"),
+            ("", "Sessions run via SSH + remote tmux"),
+            ("", "Remote worktrees shown with [host]"),
+        ]),
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),
             ("k / Up", "Move up / scroll inspector"),

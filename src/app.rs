@@ -8,6 +8,7 @@ use crate::env;
 use crate::git;
 use crate::hooks::event::HookEvent;
 use crate::orchestration;
+use crate::remote;
 use crate::session;
 use crate::ship;
 use crate::ui;
@@ -65,6 +66,8 @@ pub struct App {
     pub port_manager: env::ports::PortManager,
     /// Resource warnings from the last check.
     pub resource_warnings: Vec<env::resources::ResourceWarning>,
+    /// Cached status of remote hosts (updated periodically, not every tick).
+    pub remote_statuses: Vec<remote::host::RemoteHostStatus>,
 }
 
 impl App {
@@ -89,6 +92,14 @@ impl App {
             env::ports::PortManager::from_existing(existing_ports)
         };
 
+        // Initialize remote host statuses as unknown (will be checked periodically)
+        let remote_statuses: Vec<remote::host::RemoteHostStatus> = manager
+            .config
+            .remote
+            .iter()
+            .map(|h| remote::host::RemoteHostStatus::unknown(&h.name))
+            .collect();
+
         let mut app = Self {
             manager,
             worktrees,
@@ -107,6 +118,7 @@ impl App {
             last_list_area: None,
             port_manager,
             resource_warnings: Vec::new(),
+            remote_statuses,
         };
 
         app.update_inspector();
@@ -122,6 +134,12 @@ impl App {
             for wt in &mut updated {
                 // Don't override "Shipping" status — it's managed by the ship pipeline
                 if wt.status == WorktreeStatus::Shipping {
+                    continue;
+                }
+
+                // Skip local session tracking for remote worktrees
+                // (remote statuses are polled separately via poll_remote_statuses)
+                if wt.is_remote() {
                     continue;
                 }
 
@@ -292,29 +310,35 @@ impl App {
     /// Update inspector info for the currently selected worktree.
     pub fn update_inspector(&mut self) {
         let info = if let Some(wt) = self.selected_worktree() {
-            let wt_abs = self.manager.worktree_abs_path(wt);
-            let diff_stat_text = git::diff::diff_stat(&wt_abs)
-                .map(|s| s.raw)
-                .unwrap_or_default();
+            if wt.is_remote() {
+                // Remote worktree: get diff stat from remote host
+                self.build_remote_inspector_info(wt)
+            } else {
+                // Local worktree
+                let wt_abs = self.manager.worktree_abs_path(wt);
+                let diff_stat_text = git::diff::diff_stat(&wt_abs)
+                    .map(|s| s.raw)
+                    .unwrap_or_default();
 
-            let project_dir = session::tracker::find_project_dir(&wt_abs)
-                .ok()
-                .flatten();
+                let project_dir = session::tracker::find_project_dir(&wt_abs)
+                    .ok()
+                    .flatten();
 
-            let transcript_info = project_dir
-                .as_ref()
-                .and_then(|dir| session::transcript::read_transcript_info(dir, 1).ok())
-                .unwrap_or_default();
+                let transcript_info = project_dir
+                    .as_ref()
+                    .and_then(|dir| session::transcript::read_transcript_info(dir, 1).ok())
+                    .unwrap_or_default();
 
-            let session_id = project_dir
-                .as_ref()
-                .and_then(|dir| session::tracker::find_latest_session_id(dir).ok().flatten());
+                let session_id = project_dir
+                    .as_ref()
+                    .and_then(|dir| session::tracker::find_latest_session_id(dir).ok().flatten());
 
-            ui::inspector::InspectorInfo {
-                diff_stat_text,
-                last_message: transcript_info.last_message,
-                usage: transcript_info.usage,
-                session_id,
+                ui::inspector::InspectorInfo {
+                    diff_stat_text,
+                    last_message: transcript_info.last_message,
+                    usage: transcript_info.usage,
+                    session_id,
+                }
             }
         } else {
             ui::inspector::InspectorInfo::default()
@@ -323,6 +347,40 @@ impl App {
         self.inspector_info = info;
         // Reset scroll when changing worktree
         self.inspector_scroll = 0;
+    }
+
+    /// Build inspector info for a remote worktree.
+    /// This avoids blocking the UI by returning cached/minimal info.
+    fn build_remote_inspector_info(&self, wt: &Worktree) -> ui::inspector::InspectorInfo {
+        let remote_name = match wt.remote_host {
+            Some(ref name) => name,
+            None => return ui::inspector::InspectorInfo::default(),
+        };
+
+        let host = match self
+            .manager
+            .config
+            .remote
+            .iter()
+            .find(|r| r.name == *remote_name)
+        {
+            Some(h) => h,
+            None => return ui::inspector::InspectorInfo::default(),
+        };
+
+        let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
+
+        // Try to get remote diff stat (may be slow over network)
+        let diff_stat_text = host
+            .diff_stat(&repo_name, &wt.name)
+            .unwrap_or_else(|_| "(remote -- unable to fetch diff)".to_string());
+
+        ui::inspector::InspectorInfo {
+            diff_stat_text,
+            last_message: "(remote session -- transcript not available locally)".to_string(),
+            usage: Default::default(),
+            session_id: None,
+        }
     }
 
     /// Render the full UI.
@@ -375,12 +433,13 @@ impl App {
             self.inspector_scroll,
         );
 
-        // Render the status bar
-        ui::status_bar::render(
+        // Render the status bar (with remote host indicators)
+        ui::status_bar::render_with_remotes(
             frame,
             status_area,
             &self.status_message,
             self.worktrees.len(),
+            &self.remote_statuses,
         );
 
         // Render active dialog on top
@@ -624,7 +683,7 @@ impl App {
                 dialog.prev_field();
             }
             KeyCode::Enter => {
-                if dialog.focus == 3 {
+                if dialog.focus == dialog.confirm_field() {
                     dialog.confirmed = true;
                 } else {
                     dialog.next_field();
@@ -636,7 +695,13 @@ impl App {
             KeyCode::Right if dialog.focus == 1 => {
                 dialog.next_branch();
             }
-            KeyCode::Char(' ') if dialog.focus == 2 => {
+            KeyCode::Left if dialog.remote_field() == Some(dialog.focus) => {
+                dialog.prev_remote();
+            }
+            KeyCode::Right if dialog.remote_field() == Some(dialog.focus) => {
+                dialog.next_remote();
+            }
+            KeyCode::Char(' ') if dialog.focus == dialog.carry_field() => {
                 dialog.toggle_carry();
             }
             KeyCode::Backspace if dialog.focus == 0 => {
@@ -657,17 +722,23 @@ impl App {
                 Some(dialog_clone.name_input.as_str())
             };
 
-            match self.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
-            {
-                Ok(wt) => {
-                    let wt_name = wt.name.clone();
-                    self.setup_worktree_env(&wt_name);
-                    self.status_message = format!("Created worktree '{}'", wt_name);
-                    self.refresh();
-                    self.update_inspector();
-                }
-                Err(e) => {
-                    self.status_message = format!("Error: {}", e);
+            if let Some(ref remote_name) = dialog_clone.selected_remote {
+                // Remote worktree creation
+                self.create_remote_worktree(name, &dialog_clone.base_branch, remote_name);
+            } else {
+                // Local worktree creation
+                match self.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
+                {
+                    Ok(wt) => {
+                        let wt_name = wt.name.clone();
+                        self.setup_worktree_env(&wt_name);
+                        self.status_message = format!("Created worktree '{}'", wt_name);
+                        self.refresh();
+                        self.update_inspector();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Error: {}", e);
+                    }
                 }
             }
             self.dialog = ActiveDialog::None;
@@ -847,7 +918,14 @@ impl App {
             .into_iter()
             .map(|b| b.name)
             .collect();
-        let dialog = ui::dialogs::create::CreateDialog::new(branches);
+        let remote_names: Vec<String> = self
+            .manager
+            .config
+            .remote
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        let dialog = ui::dialogs::create::CreateDialog::with_remotes(branches, remote_names);
         self.dialog = ActiveDialog::Create(dialog);
         Ok(())
     }
@@ -920,6 +998,13 @@ impl App {
     }
 
     fn launch_session(&mut self) -> Result<()> {
+        // Check if selected worktree is remote - delegate to remote session handler
+        if let Some(wt) = self.selected_worktree() {
+            if wt.is_remote() {
+                return self.launch_remote_session();
+            }
+        }
+
         let Some(wt) = self.selected_worktree().cloned() else {
             self.status_message = "No worktree selected".to_string();
             return Ok(());
@@ -1239,7 +1324,7 @@ impl App {
     }
 
     fn open_shell(&mut self) -> Result<()> {
-        let Some(wt) = self.selected_worktree() else {
+        let Some(wt) = self.selected_worktree().cloned() else {
             self.status_message = "No worktree selected".to_string();
             return Ok(());
         };
@@ -1249,7 +1334,40 @@ impl App {
             return Ok(());
         }
 
-        let wt_abs = self.manager.worktree_abs_path(wt);
+        // Handle remote worktrees: open SSH shell
+        if let Some(ref remote_name) = wt.remote_host {
+            let host = match self
+                .manager
+                .config
+                .remote
+                .iter()
+                .find(|r| r.name == *remote_name)
+                .cloned()
+            {
+                Some(h) => h,
+                None => {
+                    self.status_message =
+                        format!("Remote host '{}' not found in config", remote_name);
+                    return Ok(());
+                }
+            };
+
+            let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
+            match remote::session::open_remote_shell(&host, &repo_name, &wt.name) {
+                Ok(pane_id) => {
+                    self.status_message = format!(
+                        "Opened remote shell for '{}' on '{}' ({})",
+                        wt.name, host.name, pane_id
+                    );
+                }
+                Err(e) => {
+                    self.status_message = format!("Remote shell error: {}", e);
+                }
+            }
+            return Ok(());
+        }
+
+        let wt_abs = self.manager.worktree_abs_path(&wt);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
         let title = format!("cwt:shell:{}", wt.name);
 
@@ -1556,8 +1674,327 @@ impl App {
         }
     }
 
+    /// Create a worktree on a remote host.
+    fn create_remote_worktree(
+        &mut self,
+        name: Option<&str>,
+        base_branch: &str,
+        remote_name: &str,
+    ) {
+        let host = match self
+            .manager
+            .config
+            .remote
+            .iter()
+            .find(|r| r.name == remote_name)
+            .cloned()
+        {
+            Some(h) => h,
+            None => {
+                self.status_message =
+                    format!("Remote host '{}' not found in config", remote_name);
+                return;
+            }
+        };
+
+        let wt_name = match name {
+            Some(n) if !n.is_empty() => n.to_string(),
+            _ => crate::worktree::slug::generate_slug(),
+        };
+
+        let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
+
+        // Ensure remote has the repo
+        let repo_url = match remote::sync::get_repo_remote_url(&self.manager.repo_root) {
+            Ok(url) => url,
+            Err(e) => {
+                self.status_message = format!("Error getting repo URL: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = host.ensure_repo(&repo_url, &repo_name) {
+            self.status_message = format!("Error setting up remote repo: {}", e);
+            return;
+        }
+
+        // Get base commit from remote
+        let base_commit = match host.head_commit(&repo_name) {
+            Ok(c) => c,
+            Err(e) => {
+                self.status_message = format!("Error getting remote HEAD: {}", e);
+                return;
+            }
+        };
+
+        // Create worktree on remote
+        let branch_name = format!("wt/{}", wt_name);
+        let remote_path = match host.create_worktree(
+            &repo_name,
+            &wt_name,
+            &branch_name,
+            base_branch,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status_message = format!("Error creating remote worktree: {}", e);
+                return;
+            }
+        };
+
+        // Register in local state
+        let wt_rel_path =
+            std::path::PathBuf::from(&self.manager.config.worktree.dir).join(&wt_name);
+        let wt = Worktree::new_remote(
+            wt_name.clone(),
+            wt_rel_path,
+            branch_name,
+            base_branch.to_string(),
+            base_commit,
+            crate::worktree::Lifecycle::Ephemeral,
+            host.name.clone(),
+            remote_path,
+        );
+
+        if let Ok(mut state) = self.manager.load_state() {
+            state.worktrees.insert(wt_name.clone(), wt);
+            let _ = self.manager.save_state(&state);
+        }
+
+        self.status_message = format!(
+            "Created remote worktree '{}' on '{}'",
+            wt_name, host.name
+        );
+        self.refresh();
+        self.update_inspector();
+    }
+
+    /// Launch or focus a remote session.
+    fn launch_remote_session(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree().cloned() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+
+        let remote_name = match wt.remote_host {
+            Some(ref name) => name.clone(),
+            None => {
+                self.status_message = "Not a remote worktree".to_string();
+                return Ok(());
+            }
+        };
+
+        let host = match self
+            .manager
+            .config
+            .remote
+            .iter()
+            .find(|r| r.name == remote_name)
+            .cloned()
+        {
+            Some(h) => h,
+            None => {
+                self.status_message =
+                    format!("Remote host '{}' not found in config", remote_name);
+                return Ok(());
+            }
+        };
+
+        // Check if we already have a local pane attached to this remote session
+        if let Some(ref pane_id) = wt.tmux_pane {
+            if crate::tmux::pane::pane_exists(pane_id) {
+                match crate::session::launcher::focus_session(pane_id) {
+                    Ok(()) => {
+                        self.status_message =
+                            format!("Focused remote session for '{}'", wt.name);
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        // Pane gone, fall through to create new attachment
+                    }
+                }
+            }
+        }
+
+        let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
+
+        // Check if remote session exists, if not launch it
+        let remote_status =
+            remote::session::check_remote_session_status(&host, &wt.name);
+
+        if remote_status == remote::session::RemoteSessionStatus::NoSession {
+            // Launch a new remote session
+            match remote::session::launch_remote_session(
+                &host,
+                &repo_name,
+                &wt.name,
+                &self.manager.config.session.claude_args,
+            ) {
+                Ok(_tmux_session) => {
+                    self.status_message =
+                        format!("Launched remote session for '{}' on '{}'", wt.name, host.name);
+                }
+                Err(e) => {
+                    self.status_message = format!("Remote session error: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+
+        // Now attach to the remote session via a local tmux pane
+        match remote::session::focus_remote_session(&host, &wt.name) {
+            Ok(pane_id) => {
+                // Update state with the local pane ID
+                if let Ok(mut state) = self.manager.load_state() {
+                    if let Some(stored) = state.worktrees.get_mut(&wt.name) {
+                        stored.tmux_pane = Some(pane_id.clone());
+                        stored.status = WorktreeStatus::Running;
+                    }
+                    let _ = self.manager.save_state(&state);
+                }
+
+                self.status_message = format!(
+                    "Attached to remote session for '{}' on '{}' ({})",
+                    wt.name, host.name, pane_id
+                );
+                self.refresh();
+                self.update_inspector();
+            }
+            Err(e) => {
+                self.status_message = format!("Remote session attach error: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Poll remote worktree statuses. Called less frequently than local refresh.
+    pub fn poll_remote_statuses(&mut self) {
+        if self.manager.config.remote.is_empty() {
+            return;
+        }
+
+        // Update network status for remote hosts
+        self.remote_statuses = self
+            .manager
+            .config
+            .remote
+            .iter()
+            .map(remote::host::RemoteHostStatus::check)
+            .collect();
+
+        // Update status of remote worktrees
+        let remote_wts: Vec<(String, String)> = self
+            .worktrees
+            .iter()
+            .filter_map(|wt| {
+                wt.remote_host
+                    .as_ref()
+                    .map(|h| (wt.name.clone(), h.clone()))
+            })
+            .collect();
+
+        if remote_wts.is_empty() {
+            return;
+        }
+
+        let _repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
+        let mut status_updates: Vec<(String, WorktreeStatus)> = Vec::new();
+
+        for (wt_name, host_name) in &remote_wts {
+            let host = match self
+                .manager
+                .config
+                .remote
+                .iter()
+                .find(|r| r.name == *host_name)
+            {
+                Some(h) => h,
+                None => continue,
+            };
+
+            // Check if host is reachable first
+            let host_status = self
+                .remote_statuses
+                .iter()
+                .find(|s| s.name == *host_name);
+            if let Some(s) = host_status {
+                if s.network == remote::host::NetworkStatus::Disconnected {
+                    continue; // Skip unreachable hosts
+                }
+            }
+
+            let session_status =
+                remote::session::check_remote_session_status(host, wt_name);
+
+            let new_status = match session_status {
+                remote::session::RemoteSessionStatus::Running => WorktreeStatus::Running,
+                remote::session::RemoteSessionStatus::Done => WorktreeStatus::Done,
+                remote::session::RemoteSessionStatus::NoSession => WorktreeStatus::Idle,
+                remote::session::RemoteSessionStatus::Unknown => {
+                    // Keep existing status
+                    continue;
+                }
+            };
+
+            // Only update if status changed
+            if let Some(wt) = self.worktrees.iter().find(|w| w.name == *wt_name) {
+                if wt.status != new_status {
+                    status_updates.push((wt_name.clone(), new_status));
+                }
+            }
+        }
+
+        // Apply updates
+        if !status_updates.is_empty() {
+            if let Ok(mut state) = self.manager.load_state() {
+                for (name, status) in &status_updates {
+                    if let Some(stored) = state.worktrees.get_mut(name) {
+                        stored.status = status.clone();
+                    }
+                }
+                let _ = self.manager.save_state(&state);
+            }
+
+            for (name, status) in status_updates {
+                if let Some(wt) = self.worktrees.iter_mut().find(|w| w.name == name) {
+                    wt.status = status;
+                }
+            }
+
+            self.update_badge_counts();
+        }
+    }
+
     /// Tear down environment (container, ports) for a worktree being deleted.
     fn teardown_worktree_env(&mut self, worktree_name: &str) {
+        // Tear down remote session and worktree if this is a remote worktree
+        if let Some(wt) = self.worktrees.iter().find(|wt| wt.name == worktree_name) {
+            if let Some(ref remote_name) = wt.remote_host {
+                if let Some(host) = self
+                    .manager
+                    .config
+                    .remote
+                    .iter()
+                    .find(|r| r.name == *remote_name)
+                    .cloned()
+                {
+                    // Kill remote session
+                    let _ = remote::session::kill_remote_session(&host, worktree_name);
+
+                    // Remove remote worktree
+                    let repo_name =
+                        remote::sync::repo_name_from_path(&self.manager.repo_root);
+                    if let Err(e) = host.remove_worktree(&repo_name, worktree_name) {
+                        self.status_message = format!(
+                            "Remote worktree cleanup warning for '{}': {}",
+                            worktree_name, e
+                        );
+                    }
+                }
+            }
+        }
+
         // Tear down container if present
         if let Some(wt) = self.worktrees.iter().find(|wt| wt.name == worktree_name) {
             if let Some(ref container) = wt.container {
@@ -2392,7 +2829,7 @@ impl ForestApp {
                 dialog.prev_field();
             }
             KeyCode::Enter => {
-                if dialog.focus == 3 {
+                if dialog.focus == dialog.confirm_field() {
                     dialog.confirmed = true;
                 } else {
                     dialog.next_field();
@@ -2404,7 +2841,13 @@ impl ForestApp {
             KeyCode::Right if dialog.focus == 1 => {
                 dialog.next_branch();
             }
-            KeyCode::Char(' ') if dialog.focus == 2 => {
+            KeyCode::Left if dialog.remote_field() == Some(dialog.focus) => {
+                dialog.prev_remote();
+            }
+            KeyCode::Right if dialog.remote_field() == Some(dialog.focus) => {
+                dialog.next_remote();
+            }
+            KeyCode::Char(' ') if dialog.focus == dialog.carry_field() => {
                 dialog.toggle_carry();
             }
             KeyCode::Backspace if dialog.focus == 0 => {
@@ -2425,6 +2868,7 @@ impl ForestApp {
             };
 
             if let Some(repo) = self.selected_repo() {
+                // Note: remote creation not yet supported in forest mode — use local
                 match repo.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
                 {
                     Ok(wt) => {

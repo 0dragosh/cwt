@@ -6,8 +6,19 @@ use ratatui::Frame;
 
 /// Render the status bar at the bottom.
 pub fn render(f: &mut Frame, area: Rect, message: &str, worktree_count: usize) {
+    render_with_remotes(f, area, message, worktree_count, &[]);
+}
+
+/// Render the status bar with optional remote host status indicators.
+pub fn render_with_remotes(
+    f: &mut Frame,
+    area: Rect,
+    message: &str,
+    worktree_count: usize,
+    remote_statuses: &[crate::remote::host::RemoteHostStatus],
+) {
     let line = if message.is_empty() {
-        Line::from(vec![
+        let mut spans = vec![
             Span::styled(
                 " cwt ",
                 Style::default()
@@ -19,7 +30,31 @@ pub fn render(f: &mut Frame, area: Rect, message: &str, worktree_count: usize) {
                 " {} worktree(s) | n:new s:session P:pr S:ship d:delete c:ci ?:help q:quit",
                 worktree_count
             )),
-        ])
+        ];
+
+        // Add remote host status indicators
+        if !remote_statuses.is_empty() {
+            spans.push(Span::raw("  "));
+            for status in remote_statuses {
+                let (icon_style, icon_text) = match &status.network {
+                    crate::remote::host::NetworkStatus::Connected(d) => (
+                        Style::default().fg(Color::Green),
+                        format!(" {} {}ms ", status.name, d.as_millis()),
+                    ),
+                    crate::remote::host::NetworkStatus::Disconnected => (
+                        Style::default().fg(Color::Red),
+                        format!(" {} !! ", status.name),
+                    ),
+                    crate::remote::host::NetworkStatus::Unknown => (
+                        Style::default().fg(Color::DarkGray),
+                        format!(" {} ?? ", status.name),
+                    ),
+                };
+                spans.push(Span::styled(icon_text, icon_style));
+            }
+        }
+
+        Line::from(spans)
     } else {
         Line::from(vec![
             Span::styled(
