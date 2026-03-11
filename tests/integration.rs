@@ -110,6 +110,7 @@ fn run_cwt_with_home(repo_root: &Path, args: &[&str], home: &Path) -> (String, S
         .args(args)
         .current_dir(repo_root)
         .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
         .output()
         .unwrap_or_else(|e| panic!("failed to run cwt binary at {}: {}", bin.display(), e));
 
