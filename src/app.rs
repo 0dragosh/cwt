@@ -614,6 +614,9 @@ impl App {
                 self.open_ci_logs()?;
             }
             KeyCode::Enter => {
+                self.launch_session()?;
+            }
+            KeyCode::Char('e') => {
                 self.open_shell()?;
             }
             KeyCode::Esc => {
@@ -681,6 +684,9 @@ impl App {
             KeyCode::Enter => {
                 if dialog.focus == dialog.confirm_field() {
                     dialog.confirmed = true;
+                } else if dialog.focus == 0 && dialog.name_input.is_empty() {
+                    // Quick-create: Enter on empty name → create with all defaults
+                    dialog.confirmed = true;
                 } else {
                     dialog.next_field();
                 }
@@ -733,7 +739,13 @@ impl App {
                         self.setup_worktree_env(&wt_name);
                         self.status_message = format!("Created worktree '{}'", wt_name);
                         self.refresh();
+                        // Select the newly created worktree
+                        self.select_worktree_by_name(&wt_name);
                         self.update_inspector();
+                        // Auto-launch session if configured
+                        if self.manager.config.session.auto_launch {
+                            let _ = self.launch_session();
+                        }
                     }
                     Err(e) => {
                         self.status_message = format!("Error: {}", e);
@@ -907,6 +919,14 @@ impl App {
             if i >= count {
                 self.list_state.select(Some(count - 1));
             }
+        }
+    }
+
+    /// Select a worktree by name, accounting for any active filter.
+    fn select_worktree_by_name(&mut self, name: &str) {
+        let filtered = self.filtered_worktrees();
+        if let Some(idx) = filtered.iter().position(|wt| wt.name == name) {
+            self.list_state.select(Some(idx));
         }
     }
 
@@ -2708,8 +2728,11 @@ impl ForestApp {
                 if self.focus == ForestFocusPanel::RepoList {
                     self.focus = ForestFocusPanel::WorktreeList;
                 } else {
-                    self.open_shell()?;
+                    self.launch_session()?;
                 }
+            }
+            KeyCode::Char('e') => {
+                self.open_shell()?;
             }
             // Worktree actions (only work when a worktree can be resolved)
             KeyCode::Char('n') => {
@@ -2810,6 +2833,9 @@ impl ForestApp {
             }
             KeyCode::Enter => {
                 if dialog.focus == dialog.confirm_field() {
+                    dialog.confirmed = true;
+                } else if dialog.focus == 0 && dialog.name_input.is_empty() {
+                    // Quick-create: Enter on empty name → create with all defaults
                     dialog.confirmed = true;
                 } else {
                     dialog.next_field();

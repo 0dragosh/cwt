@@ -114,7 +114,7 @@ pub fn render_top_bar_with_stats(
             format!(" {} done ", done_count),
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Blue)
+                .bg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ));
     }

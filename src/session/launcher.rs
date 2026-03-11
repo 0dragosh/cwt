@@ -55,7 +55,7 @@ fn build_claude_command(
     config: &SessionConfig,
     resume_session_id: Option<&str>,
 ) -> String {
-    let mut cmd_parts = vec!["claude".to_string()];
+    let mut cmd_parts = vec![config.command.clone()];
 
     if let Some(sid) = resume_session_id {
         cmd_parts.push("--resume".to_string());

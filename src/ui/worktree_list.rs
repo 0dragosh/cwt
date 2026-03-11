@@ -154,7 +154,7 @@ pub fn render(
     let border_style = if focused {
         theme::title_style()
     } else {
-        Style::default()
+        Style::default().fg(Color::DarkGray)
     };
 
     let title = if filter_mode {

@@ -106,13 +106,15 @@ src/
 ### Worktree Creation Flow
 1. User presses `n`
 2. Dialog: enter name (or press Enter for auto-generated slug like `bold-oak-a3f2`)
+   - Quick-create: pressing Enter on an empty name field creates immediately with all defaults
 3. Dialog: pick base branch (fuzzy finder over local + remote branches)
 4. Dialog: carry local changes? (only shown if working dir is dirty)
 5. `git worktree add .claude/worktrees/<name> -b wt/<name> <base>`
 6. If carry changes: `git stash` → apply in worktree → pop stash in local
 7. If setup script configured: run it in the worktree directory
-8. If `auto_launch` enabled: open Claude Code session in tmux pane
-9. Register in `.cwt/state.json` as ephemeral
+8. New worktree is auto-selected in the list
+9. If `auto_launch` enabled: session starts automatically via `session.command`
+10. Register in `.cwt/state.json` as ephemeral
 
 ### Handoff Flow (Worktree → Local)
 1. User selects worktree, presses `h`
@@ -154,14 +156,15 @@ src/
 
 | Key | Action | Context |
 |-----|--------|---------|
-| `n` | New worktree | Global |
-| `s` | Launch/resume session | Worktree selected |
+| `n` | New worktree (Enter to quick-create) | Global |
+| `Enter` | Launch/resume Claude session | Worktree selected |
+| `s` | Launch/resume Claude session | Worktree selected |
+| `e` | Open shell in worktree (tmux tab) | Worktree selected |
 | `h` | Handoff | Worktree selected |
 | `p` | Promote to permanent | Ephemeral selected |
 | `d` | Delete (with snapshot) | Worktree selected |
 | `g` | Run GC | Global |
 | `r` | Restore from snapshot | Global |
-| `Enter` | Open shell in worktree | Worktree selected |
 | `j/k` or `↓/↑` | Navigate list | Worktree list |
 | `Tab` | Switch panel focus | Global |
 | `/` | Filter/search worktrees | Worktree list |
@@ -182,7 +185,8 @@ script = ""                      # path to setup script (relative to repo root)
 timeout_secs = 120               # setup script timeout
 
 [session]
-auto_launch = true               # launch claude on worktree create
+auto_launch = true               # launch claude on worktree create + Enter
+command = "claude"               # command to run (e.g. custom wrapper script)
 claude_args = []                 # extra args for claude invocation
 
 [handoff]

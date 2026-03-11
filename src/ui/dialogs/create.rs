@@ -239,6 +239,14 @@ pub fn render(f: &mut Frame, dialog: &CreateDialog) {
         } else {
             Span::raw("")
         },
+        if dialog.focus == 0 && dialog.name_input.is_empty() {
+            Span::styled(
+                "  Enter to quick-create",
+                Style::default().fg(Color::DarkGray),
+            )
+        } else {
+            Span::raw("")
+        },
     ]);
     f.render_widget(Paragraph::new(name_label), chunks[0]);
 

@@ -6,7 +6,7 @@ description = "Claude Worktree Manager — TUI for managing git worktrees with C
 license = "MIT"
 
 [dependencies]
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
