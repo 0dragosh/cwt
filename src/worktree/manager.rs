@@ -3,8 +3,9 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::git;
-use crate::state::{State, StateStore};
+use crate::state::{SnapshotEntry, State, StateStore};
 use crate::worktree::model::{Lifecycle, Worktree, WorktreeStatus};
+use crate::worktree::setup;
 use crate::worktree::slug::generate_slug;
 use crate::worktree::snapshot;
 
@@ -105,6 +106,19 @@ impl Manager {
             base_commit,
             Lifecycle::Ephemeral,
         );
+
+        // Run setup script if configured
+        if let Some(result) = setup::run_setup_script(&wt_abs_path, &self.config.setup) {
+            match result {
+                Ok(r) if !r.success => {
+                    eprintln!("warning: setup script failed for '{}': {}", name, r.stderr);
+                }
+                Err(e) => {
+                    eprintln!("warning: setup script error for '{}': {}", name, e);
+                }
+                _ => {}
+            }
+        }
 
         // Update state
         let mut state = self.load_state()?;
@@ -226,6 +240,74 @@ impl Manager {
             }
         }
         Ok(deleted)
+    }
+
+    /// List snapshots from state.
+    pub fn list_snapshots(&self) -> Result<Vec<SnapshotEntry>> {
+        let state = self.load_state()?;
+        let mut snaps = state.snapshots;
+        // Most recent first
+        snaps.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        Ok(snaps)
+    }
+
+    /// Restore a worktree from a snapshot.
+    /// Creates a new worktree from the snapshot's base commit, then applies the patch.
+    pub fn restore_snapshot(&self, snap: &SnapshotEntry) -> Result<Worktree> {
+        // Read the patch file
+        let patch_content = std::fs::read_to_string(&snap.patch_file)
+            .with_context(|| format!("failed to read snapshot {}", snap.patch_file.display()))?;
+
+        // Extract just the patch content (skip metadata comment lines and section markers)
+        let mut uncommitted_patch = String::new();
+        let mut committed_patch = String::new();
+        let mut current_section = "";
+
+        for line in patch_content.lines() {
+            if line.starts_with("### Committed changes ###") {
+                current_section = "committed";
+                continue;
+            } else if line.starts_with("### Uncommitted changes ###") {
+                current_section = "uncommitted";
+                continue;
+            } else if line.starts_with('#') && current_section.is_empty() {
+                // Skip header comments
+                continue;
+            }
+
+            match current_section {
+                "committed" => {
+                    committed_patch.push_str(line);
+                    committed_patch.push('\n');
+                }
+                "uncommitted" => {
+                    uncommitted_patch.push_str(line);
+                    uncommitted_patch.push('\n');
+                }
+                _ => {}
+            }
+        }
+
+        // Create a new worktree from the base branch
+        let name = snap.name.clone();
+        let wt = self.create(Some(&name), &snap.base_branch, false)
+            .with_context(|| format!("failed to create worktree for restore of '{}'", name))?;
+
+        let wt_abs_path = self.worktree_abs_path(&wt);
+
+        // Apply committed changes first
+        if !committed_patch.trim().is_empty() {
+            git::commands::apply_patch(&wt_abs_path, committed_patch.trim())
+                .context("failed to apply committed changes from snapshot")?;
+        }
+
+        // Apply uncommitted changes
+        if !uncommitted_patch.trim().is_empty() {
+            git::commands::apply_patch(&wt_abs_path, uncommitted_patch.trim())
+                .context("failed to apply uncommitted changes from snapshot")?;
+        }
+
+        Ok(wt)
     }
 
     /// Resolve the absolute path of a worktree.

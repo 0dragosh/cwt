@@ -1,6 +1,7 @@
 pub mod handoff;
 pub mod manager;
 pub mod model;
+pub mod setup;
 pub mod slug;
 pub mod snapshot;
 
