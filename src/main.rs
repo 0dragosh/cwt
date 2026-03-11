@@ -7,6 +7,7 @@ mod git;
 mod hooks;
 mod orchestration;
 mod session;
+mod ship;
 mod state;
 mod tmux;
 mod ui;
@@ -214,6 +215,10 @@ fn run_tui(manager: Manager) -> Result<()> {
             if tick_count.is_multiple_of(16) {
                 app.update_dashboard();
             }
+            // Poll PR/CI status even less frequently (every ~30 seconds = ~120 ticks)
+            if tick_count.is_multiple_of(120) {
+                app.poll_ship_status();
+            }
         }
     }
 
@@ -255,6 +260,14 @@ fn startup_checks() -> Result<()> {
         eprintln!("warning: claude not found on PATH");
         eprintln!("  Session launching requires Claude Code CLI.");
         eprintln!("  Install: https://docs.anthropic.com/en/docs/claude-code");
+        eprintln!();
+    }
+
+    // Check that gh is available (warn but don't block)
+    if which::which("gh").is_err() {
+        eprintln!("warning: gh (GitHub CLI) not found on PATH");
+        eprintln!("  Ship pipeline (P/S keys) requires gh.");
+        eprintln!("  Install: https://cli.github.com/");
         eprintln!();
     }
 
@@ -646,6 +659,10 @@ fn run_forest_tui() -> Result<()> {
         if tick_count.is_multiple_of(4) {
             app.refresh();
             app.update_inspector();
+            // Poll PR/CI status less frequently (every ~30 seconds = ~120 ticks)
+            if tick_count.is_multiple_of(120) {
+                app.poll_ship_status();
+            }
         }
     }
 

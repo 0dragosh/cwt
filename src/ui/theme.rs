@@ -5,6 +5,7 @@ pub const ICON_IDLE: &str = "○";
 pub const ICON_RUNNING: &str = "●";
 pub const ICON_WAITING: &str = "◑";
 pub const ICON_DONE: &str = "✓";
+pub const ICON_SHIPPING: &str = "^";
 pub const ICON_EPHEMERAL: &str = "ε";
 pub const ICON_PERMANENT: &str = "π";
 
@@ -29,6 +30,10 @@ pub fn status_waiting_style() -> Style {
 
 pub fn status_done_style() -> Style {
     Style::default().fg(Color::Blue)
+}
+
+pub fn status_shipping_style() -> Style {
+    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
 }
 
 pub fn status_idle_style() -> Style {

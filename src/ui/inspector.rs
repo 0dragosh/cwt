@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::session::transcript::TranscriptUsage;
+use crate::ship::pr::{CiStatus, PrStatus};
 use crate::ui::theme;
 use crate::worktree::model::{Lifecycle, Worktree, WorktreeStatus};
 
@@ -61,7 +62,7 @@ pub fn render(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Calculate dynamic metadata height: base 7 lines + optional session/usage lines
+    // Calculate dynamic metadata height: base 7 lines + optional session/usage/PR lines
     let mut meta_height: u16 = 7;
     if wt.tmux_pane.is_some() {
         meta_height += 1; // pane line
@@ -71,6 +72,12 @@ pub fn render(
     }
     if info.usage.total_cost_usd.is_some() {
         meta_height += 1; // cost line
+    }
+    if wt.pr_number.is_some() {
+        meta_height += 1; // PR line
+    }
+    if wt.ci_status != CiStatus::None {
+        meta_height += 1; // CI line
     }
 
     let chunks = Layout::default()
@@ -156,12 +163,49 @@ pub fn render(
         ]));
     }
 
+    // Show PR info if available
+    if let Some(pr_num) = wt.pr_number {
+        let pr_label = wt.pr_status.label();
+        let pr_url_str = wt
+            .pr_url
+            .as_deref()
+            .unwrap_or("(no url)");
+        let pr_style = match wt.pr_status {
+            PrStatus::Draft => Style::default().fg(ratatui::style::Color::DarkGray),
+            PrStatus::Open => Style::default().fg(ratatui::style::Color::Blue),
+            PrStatus::Approved => theme::success_style(),
+            PrStatus::Merged => Style::default().fg(ratatui::style::Color::Magenta),
+            PrStatus::Closed => theme::error_style(),
+            PrStatus::None => Style::default(),
+        };
+        meta_lines.push(Line::from(vec![
+            Span::styled("PR:        ", theme::help_key_style()),
+            Span::styled(format!("#{} ({})", pr_num, pr_label), pr_style),
+            Span::styled(format!("  {}", pr_url_str), Style::default().fg(ratatui::style::Color::DarkGray)),
+        ]));
+    }
+
+    // Show CI status if available
+    if wt.ci_status != CiStatus::None {
+        let ci_label = wt.ci_status.icon();
+        let ci_style = match wt.ci_status {
+            CiStatus::Pending => theme::status_waiting_style(),
+            CiStatus::Passed => theme::success_style(),
+            CiStatus::Failed => theme::error_style(),
+            CiStatus::None => Style::default(),
+        };
+        meta_lines.push(Line::from(vec![
+            Span::styled("CI:        ", theme::help_key_style()),
+            Span::styled(ci_label, ci_style),
+        ]));
+    }
+
     let meta = Paragraph::new(meta_lines);
     f.render_widget(meta, chunks[0]);
 
     // Separator
     let sep = Paragraph::new(
-        "─".repeat(chunks[1].width as usize)
+        "\u{2500}".repeat(chunks[1].width as usize)
     )
     .style(Style::default().fg(ratatui::style::Color::DarkGray));
     f.render_widget(sep, chunks[1]);
@@ -228,6 +272,10 @@ fn format_status(wt: &Worktree) -> (String, Style) {
             theme::status_waiting_style(),
         ),
         WorktreeStatus::Done => ("done".to_string(), theme::status_done_style()),
+        WorktreeStatus::Shipping => (
+            "shipping (PR open)".to_string(),
+            theme::status_shipping_style(),
+        ),
     }
 }
 

@@ -16,7 +16,7 @@ pub fn render(f: &mut Frame, area: Rect, message: &str, worktree_count: usize) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                " {} worktree(s) | n:new s:session t:dispatch b:broadcast d:delete ?:help q:quit",
+                " {} worktree(s) | n:new s:session P:pr S:ship d:delete c:ci ?:help q:quit",
                 worktree_count
             )),
         ])

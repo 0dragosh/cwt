@@ -8,6 +8,7 @@ use crate::git;
 use crate::hooks::event::HookEvent;
 use crate::orchestration;
 use crate::session;
+use crate::ship;
 use crate::ui;
 use crate::worktree::handoff::{self, HandoffDirection};
 use crate::worktree::model::{Worktree, WorktreeStatus};
@@ -27,6 +28,7 @@ pub enum ActiveDialog {
     Restore(ui::dialogs::restore::RestoreDialog),
     Dispatch(ui::dialogs::dispatch::DispatchDialog),
     Broadcast(ui::dialogs::broadcast::BroadcastDialog),
+    Ship(ui::dialogs::ship::ShipDialog),
     Help,
 }
 
@@ -97,6 +99,11 @@ impl App {
         if let Ok(worktrees) = self.manager.list() {
             let mut updated = worktrees;
             for wt in &mut updated {
+                // Don't override "Shipping" status — it's managed by the ship pipeline
+                if wt.status == WorktreeStatus::Shipping {
+                    continue;
+                }
+
                 let new_status = session::tracker::check_status(wt.tmux_pane.as_deref());
 
                 // If session just finished (was Running, now Done), clear the pane
@@ -365,6 +372,7 @@ impl App {
             ActiveDialog::Restore(d) => ui::dialogs::restore::render(frame, d),
             ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
             ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
+            ActiveDialog::Ship(d) => ui::dialogs::ship::render(frame, d),
             ActiveDialog::Help => ui::help::render(frame),
         }
     }
@@ -455,6 +463,7 @@ impl App {
             ActiveDialog::Restore(_) => self.handle_restore_key(key),
             ActiveDialog::Dispatch(_) => self.handle_dispatch_key(key),
             ActiveDialog::Broadcast(_) => self.handle_broadcast_key(key),
+            ActiveDialog::Ship(_) => self.handle_ship_key(key),
         }
     }
 
@@ -518,6 +527,15 @@ impl App {
             }
             KeyCode::Char('b') => {
                 self.open_broadcast_dialog()?;
+            }
+            KeyCode::Char('P') => {
+                self.open_ship_dialog()?;
+            }
+            KeyCode::Char('S') => {
+                self.execute_ship()?;
+            }
+            KeyCode::Char('c') => {
+                self.open_ci_logs()?;
             }
             KeyCode::Enter => {
                 self.open_shell()?;
@@ -1215,6 +1233,262 @@ impl App {
 
         Ok(())
     }
+
+    /// Open the ship/PR dialog for the selected worktree.
+    fn open_ship_dialog(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found (install: https://cli.github.com/)".to_string();
+            return Ok(());
+        }
+
+        let wt_abs = self.manager.worktree_abs_path(wt);
+        let diff_preview = git::diff::diff_stat(&wt_abs)
+            .map(|s| s.raw)
+            .unwrap_or_else(|_| "Unable to get diff".to_string());
+        let files_changed = git::diff::diff_stat(&wt_abs)
+            .map(|s| s.files_changed)
+            .unwrap_or(0);
+
+        let dialog = ui::dialogs::ship::ShipDialog::new(
+            wt.name.clone(),
+            wt.branch.clone(),
+            wt.base_branch.clone(),
+            diff_preview,
+            files_changed,
+        );
+        self.dialog = ActiveDialog::Ship(dialog);
+        Ok(())
+    }
+
+    /// Handle keys in the ship dialog.
+    fn handle_ship_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Ship(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Tab => {
+                dialog.toggle_mode();
+            }
+            KeyCode::Enter => {
+                dialog.confirmed = true;
+            }
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            if let Some(wt) = self.selected_worktree().cloned() {
+                let wt_abs = self.manager.worktree_abs_path(&wt);
+
+                if dialog_clone.mode == 0 {
+                    // "Create PR only" — just push and create PR
+                    self.do_create_pr(&wt, &wt_abs);
+                } else {
+                    // "Ship it" — push + PR + mark shipping
+                    self.do_ship(&wt, &wt_abs);
+                }
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
+        }
+
+        Ok(())
+    }
+
+    /// Create a PR for the worktree (P key -> confirm).
+    fn do_create_pr(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
+        match ship::pr::commit_and_push(wt_abs, &wt.branch) {
+            Ok(push_msg) => {
+                self.status_message = push_msg;
+            }
+            Err(e) => {
+                self.status_message = format!("Push failed: {}", e);
+                return;
+            }
+        }
+
+        let body = ship::pr::generate_pr_body(wt_abs, wt);
+        let title = format!("{}: {}", wt.name, wt.branch);
+
+        match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
+            Ok(result) => {
+                // Update worktree state with PR info
+                if let Ok(mut state) = self.manager.load_state() {
+                    if let Some(stored) = state.worktrees.get_mut(&wt.name) {
+                        stored.pr_number = Some(result.pr_number);
+                        stored.pr_url = Some(result.pr_url.clone());
+                        stored.pr_status = ship::pr::PrStatus::Open;
+                    }
+                    let _ = self.manager.save_state(&state);
+                }
+
+                self.status_message = format!(
+                    "PR #{} created: {}",
+                    result.pr_number, result.pr_url
+                );
+                self.refresh();
+                self.update_inspector();
+            }
+            Err(e) => {
+                self.status_message = format!("PR creation failed: {}", e);
+            }
+        }
+    }
+
+    /// Execute the "ship it" flow: push + PR + mark shipping.
+    fn do_ship(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
+        match ship::pipeline::ship(wt, wt_abs) {
+            Ok(result) => {
+                // Update worktree state with PR info and shipping status
+                if let Ok(mut state) = self.manager.load_state() {
+                    if let Some(stored) = state.worktrees.get_mut(&wt.name) {
+                        stored.pr_number = Some(result.pr_number);
+                        stored.pr_url = Some(result.pr_url.clone());
+                        stored.pr_status = ship::pr::PrStatus::Open;
+                        stored.status = WorktreeStatus::Shipping;
+                    }
+                    let _ = self.manager.save_state(&state);
+                }
+
+                self.status_message = format!(
+                    "Shipped! PR #{}: {}",
+                    result.pr_number, result.pr_url
+                );
+                self.refresh();
+                self.update_inspector();
+            }
+            Err(e) => {
+                self.status_message = format!("Ship failed: {}", e);
+            }
+        }
+    }
+
+    /// Execute "ship it" macro directly from the S key (skips dialog).
+    fn execute_ship(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree().cloned() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found (install: https://cli.github.com/)".to_string();
+            return Ok(());
+        }
+
+        let wt_abs = self.manager.worktree_abs_path(&wt);
+        self.do_ship(&wt, &wt_abs);
+        Ok(())
+    }
+
+    /// Open CI logs in browser for the selected worktree.
+    fn open_ci_logs(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found".to_string();
+            return Ok(());
+        }
+
+        match ship::ci::open_ci_logs(&self.manager.repo_root, &wt.branch) {
+            Ok(()) => {
+                self.status_message = format!("Opening CI logs for '{}'", wt.name);
+            }
+            Err(e) => {
+                self.status_message = format!("CI logs: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Poll PR/CI status for worktrees that have open PRs.
+    /// Called periodically from the refresh loop.
+    pub fn poll_ship_status(&mut self) {
+        if !ship::pr::gh_available() {
+            return;
+        }
+
+        let mut updates: Vec<(String, ship::pr::PrStatus, ship::pr::CiStatus, Option<String>)> =
+            Vec::new();
+        let mut merged_worktrees: Vec<String> = Vec::new();
+
+        for wt in &self.worktrees {
+            if wt.pr_number.is_none() {
+                continue;
+            }
+
+            let (pr_status, ci_status, pr_url) =
+                ship::pipeline::poll_status(&self.manager.repo_root, wt);
+
+            // Check if PR was just merged
+            if pr_status == ship::pr::PrStatus::Merged
+                && wt.pr_status != ship::pr::PrStatus::Merged
+            {
+                merged_worktrees.push(wt.name.clone());
+            }
+
+            updates.push((wt.name.clone(), pr_status, ci_status, pr_url));
+        }
+
+        // Apply updates
+        if !updates.is_empty() {
+            if let Ok(mut state) = self.manager.load_state() {
+                for (name, pr_status, ci_status, pr_url) in &updates {
+                    if let Some(stored) = state.worktrees.get_mut(name) {
+                        stored.pr_status = pr_status.clone();
+                        stored.ci_status = ci_status.clone();
+                        if let Some(url) = pr_url {
+                            stored.pr_url = Some(url.clone());
+                        }
+                    }
+                }
+                let _ = self.manager.save_state(&state);
+            }
+
+            // Update local worktree list
+            for (name, pr_status, ci_status, pr_url) in updates {
+                if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == name) {
+                    wt.pr_status = pr_status;
+                    wt.ci_status = ci_status;
+                    if let Some(url) = pr_url {
+                        wt.pr_url = Some(url);
+                    }
+                }
+            }
+        }
+
+        // Auto-cleanup merged worktrees
+        for name in merged_worktrees {
+            self.status_message =
+                format!("PR merged for '{}' -- auto-cleaning up", name);
+            match self.manager.delete(&name) {
+                Ok(()) => {
+                    self.status_message =
+                        format!("PR merged for '{}' -- worktree cleaned up", name);
+                }
+                Err(e) => {
+                    self.status_message =
+                        format!("PR merged for '{}' but cleanup failed: {}", name, e);
+                }
+            }
+            self.refresh();
+            self.clamp_selection();
+            self.update_inspector();
+        }
+    }
 }
 
 // --- Forest Mode ---
@@ -1377,6 +1651,11 @@ impl ForestApp {
         for repo in &mut self.repos {
             if let Ok(mut worktrees) = repo.manager.list() {
                 for wt in &mut worktrees {
+                    // Don't override "Shipping" status — it's managed by the ship pipeline
+                    if wt.status == WorktreeStatus::Shipping {
+                        continue;
+                    }
+
                     let new_status = session::tracker::check_status(wt.tmux_pane.as_deref());
 
                     if wt.status == WorktreeStatus::Running
@@ -1577,6 +1856,7 @@ impl ForestApp {
             ActiveDialog::Restore(d) => ui::dialogs::restore::render(frame, d),
             ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
             ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
+            ActiveDialog::Ship(d) => ui::dialogs::ship::render(frame, d),
             ActiveDialog::Help => ui::help::render(frame),
         }
     }
@@ -1688,6 +1968,7 @@ impl ForestApp {
             ActiveDialog::Restore(_) => self.handle_restore_key(key),
             ActiveDialog::Dispatch(_) => self.handle_dispatch_key(key),
             ActiveDialog::Broadcast(_) => self.handle_broadcast_key(key),
+            ActiveDialog::Ship(_) => self.handle_ship_key(key),
         }
     }
 
@@ -1776,6 +2057,15 @@ impl ForestApp {
             }
             KeyCode::Char('b') => {
                 self.open_broadcast_dialog()?;
+            }
+            KeyCode::Char('P') => {
+                self.open_ship_dialog()?;
+            }
+            KeyCode::Char('S') => {
+                self.execute_ship()?;
+            }
+            KeyCode::Char('c') => {
+                self.open_ci_logs()?;
             }
             KeyCode::Esc => {
                 if !self.filter.is_empty() {
@@ -2546,5 +2836,263 @@ impl ForestApp {
         }
 
         Ok(())
+    }
+
+    /// Open the ship/PR dialog for the selected worktree.
+    fn open_ship_dialog(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree().cloned() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+        let Some(repo) = self.selected_repo() else {
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found (install: https://cli.github.com/)".to_string();
+            return Ok(());
+        }
+
+        let wt_abs = repo.manager.worktree_abs_path(&wt);
+        let diff_preview = git::diff::diff_stat(&wt_abs)
+            .map(|s| s.raw)
+            .unwrap_or_else(|_| "Unable to get diff".to_string());
+        let files_changed = git::diff::diff_stat(&wt_abs)
+            .map(|s| s.files_changed)
+            .unwrap_or(0);
+
+        let dialog = ui::dialogs::ship::ShipDialog::new(
+            wt.name.clone(),
+            wt.branch.clone(),
+            wt.base_branch.clone(),
+            diff_preview,
+            files_changed,
+        );
+        self.dialog = ActiveDialog::Ship(dialog);
+        Ok(())
+    }
+
+    /// Handle keys in the ship dialog.
+    fn handle_ship_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Ship(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Tab => {
+                dialog.toggle_mode();
+            }
+            KeyCode::Enter => {
+                dialog.confirmed = true;
+            }
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            if let (Some(wt), Some(repo)) =
+                (self.selected_worktree().cloned(), self.selected_repo())
+            {
+                let wt_abs = repo.manager.worktree_abs_path(&wt);
+
+                if dialog_clone.mode == 0 {
+                    self.do_create_pr(&wt, &wt_abs);
+                } else {
+                    self.do_ship(&wt, &wt_abs);
+                }
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
+        }
+
+        Ok(())
+    }
+
+    /// Create a PR for the worktree.
+    fn do_create_pr(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
+        match ship::pr::commit_and_push(wt_abs, &wt.branch) {
+            Ok(push_msg) => {
+                self.status_message = push_msg;
+            }
+            Err(e) => {
+                self.status_message = format!("Push failed: {}", e);
+                return;
+            }
+        }
+
+        let body = ship::pr::generate_pr_body(wt_abs, wt);
+        let title = format!("{}: {}", wt.name, wt.branch);
+
+        match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
+            Ok(result) => {
+                if let Some(repo) = self.selected_repo() {
+                    if let Ok(mut state) = repo.manager.load_state() {
+                        if let Some(stored) = state.worktrees.get_mut(&wt.name) {
+                            stored.pr_number = Some(result.pr_number);
+                            stored.pr_url = Some(result.pr_url.clone());
+                            stored.pr_status = ship::pr::PrStatus::Open;
+                        }
+                        let _ = repo.manager.save_state(&state);
+                    }
+                }
+
+                self.status_message = format!(
+                    "PR #{} created: {}",
+                    result.pr_number, result.pr_url
+                );
+                self.refresh();
+                self.update_inspector();
+            }
+            Err(e) => {
+                self.status_message = format!("PR creation failed: {}", e);
+            }
+        }
+    }
+
+    /// Execute the "ship it" flow.
+    fn do_ship(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
+        match ship::pipeline::ship(wt, wt_abs) {
+            Ok(result) => {
+                if let Some(repo) = self.selected_repo() {
+                    if let Ok(mut state) = repo.manager.load_state() {
+                        if let Some(stored) = state.worktrees.get_mut(&wt.name) {
+                            stored.pr_number = Some(result.pr_number);
+                            stored.pr_url = Some(result.pr_url.clone());
+                            stored.pr_status = ship::pr::PrStatus::Open;
+                            stored.status = WorktreeStatus::Shipping;
+                        }
+                        let _ = repo.manager.save_state(&state);
+                    }
+                }
+
+                self.status_message = format!(
+                    "Shipped! PR #{}: {}",
+                    result.pr_number, result.pr_url
+                );
+                self.refresh();
+                self.update_inspector();
+            }
+            Err(e) => {
+                self.status_message = format!("Ship failed: {}", e);
+            }
+        }
+    }
+
+    /// Execute "ship it" macro directly from the S key.
+    fn execute_ship(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree().cloned() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found (install: https://cli.github.com/)".to_string();
+            return Ok(());
+        }
+
+        let Some(repo) = self.selected_repo() else {
+            return Ok(());
+        };
+        let wt_abs = repo.manager.worktree_abs_path(&wt);
+        self.do_ship(&wt, &wt_abs);
+        Ok(())
+    }
+
+    /// Open CI logs in browser.
+    fn open_ci_logs(&mut self) -> Result<()> {
+        let Some(wt) = self.selected_worktree() else {
+            self.status_message = "No worktree selected".to_string();
+            return Ok(());
+        };
+        let Some(repo) = self.selected_repo() else {
+            return Ok(());
+        };
+
+        if !ship::pr::gh_available() {
+            self.status_message = "gh CLI not found".to_string();
+            return Ok(());
+        }
+
+        match ship::ci::open_ci_logs(&repo.manager.repo_root, &wt.branch) {
+            Ok(()) => {
+                self.status_message = format!("Opening CI logs for '{}'", wt.name);
+            }
+            Err(e) => {
+                self.status_message = format!("CI logs: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Poll PR/CI status for worktrees that have open PRs across all repos.
+    pub fn poll_ship_status(&mut self) {
+        if !ship::pr::gh_available() {
+            return;
+        }
+
+        for repo in &mut self.repos {
+            let mut updates: Vec<(
+                String,
+                ship::pr::PrStatus,
+                ship::pr::CiStatus,
+                Option<String>,
+            )> = Vec::new();
+            let mut merged_names: Vec<String> = Vec::new();
+
+            for wt in &repo.worktrees {
+                if wt.pr_number.is_none() {
+                    continue;
+                }
+
+                let (pr_status, ci_status, pr_url) =
+                    ship::pipeline::poll_status(&repo.manager.repo_root, wt);
+
+                if pr_status == ship::pr::PrStatus::Merged
+                    && wt.pr_status != ship::pr::PrStatus::Merged
+                {
+                    merged_names.push(wt.name.clone());
+                }
+
+                updates.push((wt.name.clone(), pr_status, ci_status, pr_url));
+            }
+
+            // Apply updates
+            if !updates.is_empty() {
+                if let Ok(mut state) = repo.manager.load_state() {
+                    for (name, pr_status, ci_status, pr_url) in &updates {
+                        if let Some(stored) = state.worktrees.get_mut(name) {
+                            stored.pr_status = pr_status.clone();
+                            stored.ci_status = ci_status.clone();
+                            if let Some(url) = pr_url {
+                                stored.pr_url = Some(url.clone());
+                            }
+                        }
+                    }
+                    let _ = repo.manager.save_state(&state);
+                }
+
+                for (name, pr_status, ci_status, pr_url) in updates {
+                    if let Some(wt) = repo.worktrees.iter_mut().find(|wt| wt.name == name) {
+                        wt.pr_status = pr_status;
+                        wt.ci_status = ci_status;
+                        if let Some(url) = pr_url {
+                            wt.pr_url = Some(url);
+                        }
+                    }
+                }
+            }
+
+            // Auto-cleanup merged worktrees
+            for name in merged_names {
+                let _ = repo.manager.delete(&name);
+            }
+        }
+
+        self.refresh();
     }
 }

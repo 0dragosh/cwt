@@ -98,7 +98,7 @@ pub fn compute_repo_stats(repo_root: &Path) -> RepoStats {
             WorktreeStatus::Running => stats.running_sessions += 1,
             WorktreeStatus::Waiting => stats.waiting_sessions += 1,
             WorktreeStatus::Done => stats.done_sessions += 1,
-            WorktreeStatus::Idle => {}
+            WorktreeStatus::Idle | WorktreeStatus::Shipping => {}
         }
     }
 
