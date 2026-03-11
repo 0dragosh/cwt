@@ -5,3 +5,4 @@ pub mod dispatch;
 pub mod gc;
 pub mod handoff;
 pub mod restore;
+pub mod ship;

@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::ship::pr::{CiStatus, PrStatus};
+
 /// Lifecycle of a worktree: ephemeral (auto-GC'd) or permanent (never auto-deleted).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,6 +21,7 @@ pub enum WorktreeStatus {
     Running,
     Waiting,
     Done,
+    Shipping,
 }
 
 /// A managed worktree with its metadata.
@@ -37,6 +40,18 @@ pub struct Worktree {
     pub tmux_pane: Option<String>,
     #[serde(default)]
     pub status: WorktreeStatus,
+    /// PR number on GitHub (if a PR has been created).
+    #[serde(default)]
+    pub pr_number: Option<u64>,
+    /// PR URL on GitHub.
+    #[serde(default)]
+    pub pr_url: Option<String>,
+    /// Current PR status (draft/open/approved/merged/closed).
+    #[serde(default)]
+    pub pr_status: PrStatus,
+    /// Current CI/GitHub Actions status.
+    #[serde(default)]
+    pub ci_status: CiStatus,
 }
 
 impl Worktree {
@@ -59,10 +74,22 @@ impl Worktree {
             last_session_id: None,
             tmux_pane: None,
             status: WorktreeStatus::Idle,
+            pr_number: None,
+            pr_url: None,
+            pr_status: PrStatus::None,
+            ci_status: CiStatus::None,
         }
     }
 
     pub fn is_ephemeral(&self) -> bool {
         self.lifecycle == Lifecycle::Ephemeral
+    }
+
+    /// Whether this worktree has an active PR (not None, not Merged, not Closed).
+    pub fn has_active_pr(&self) -> bool {
+        matches!(
+            self.pr_status,
+            PrStatus::Draft | PrStatus::Open | PrStatus::Approved
+        )
     }
 }

@@ -8,7 +8,7 @@ use crate::ui::theme;
 
 /// Render the help overlay — a full-screen keybinding reference.
 pub fn render(f: &mut Frame) {
-    let area = centered_rect(60, 33, f.area());
+    let area = centered_rect(60, 40, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -33,6 +33,11 @@ pub fn render(f: &mut Frame) {
         ("Orchestration", vec![
             ("t", "Dispatch tasks (multi-worktree)"),
             ("b", "Broadcast prompt to all sessions"),
+        ]),
+        ("Ship Pipeline", vec![
+            ("P", "Create PR (push + gh pr create)"),
+            ("S", "Ship it (push + PR + mark shipping)"),
+            ("c", "Open CI logs in browser"),
         ]),
         ("Navigation", vec![
             ("j / Down", "Move down / scroll inspector"),

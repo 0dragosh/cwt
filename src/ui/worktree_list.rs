@@ -41,6 +41,9 @@ pub fn render(
                 WorktreeStatus::Done => {
                     Span::styled(theme::ICON_DONE, theme::status_done_style())
                 }
+                WorktreeStatus::Shipping => {
+                    Span::styled(theme::ICON_SHIPPING, theme::status_shipping_style())
+                }
             };
 
             let lifecycle_icon = match wt.lifecycle {
@@ -106,6 +109,10 @@ pub fn render(
             ];
             line_spans.extend(name_span);
             line_spans.push(branch);
+
+            // Add PR/CI status icons
+            let pr_ci = crate::ui::dialogs::ship::pr_ci_spans(&wt.pr_status, &wt.ci_status);
+            line_spans.extend(pr_ci);
 
             let line = Line::from(line_spans);
 

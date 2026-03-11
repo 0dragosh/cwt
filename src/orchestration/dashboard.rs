@@ -49,6 +49,7 @@ where
             WorktreeStatus::Waiting => stats.waiting_sessions += 1,
             WorktreeStatus::Done => stats.done_sessions += 1,
             WorktreeStatus::Idle => stats.idle_sessions += 1,
+            WorktreeStatus::Shipping => stats.done_sessions += 1,
         }
 
         let wt_abs = resolve_abs_path(wt);
