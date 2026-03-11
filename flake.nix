@@ -30,11 +30,19 @@
             version = "0.1.0";
             src = craneLib.cleanCargoSource ./.;
 
-            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper git ];
             buildInputs = with pkgs; [ ]
               ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
                 pkgs.apple-sdk_15
               ];
+
+            # Integration tests need git with a configured identity
+            preCheck = ''
+              export HOME=$(mktemp -d)
+              git config --global user.email "test@cwt.dev"
+              git config --global user.name "cwt-test"
+              git config --global init.defaultBranch main
+            '';
 
             # Runtime deps that should be on PATH
             postInstall = ''

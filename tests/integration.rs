@@ -6,12 +6,44 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// A shared temporary HOME directory so that git config and ~/.cwt/snapshots/
+/// work correctly across all tests (including in the nix build sandbox where
+/// the real HOME may not be writable).
+fn test_home() -> &'static Path {
+    static HOME: OnceLock<TempDir> = OnceLock::new();
+    HOME.get_or_init(|| {
+        let home = TempDir::new().expect("create test HOME");
+        // Configure git globally inside the test HOME
+        let out = Command::new("git")
+            .args(["config", "--global", "user.email", "test@cwt.dev"])
+            .env("HOME", home.path())
+            .output()
+            .expect("git config");
+        assert!(out.status.success());
+        let out = Command::new("git")
+            .args(["config", "--global", "user.name", "cwt-test"])
+            .env("HOME", home.path())
+            .output()
+            .expect("git config");
+        assert!(out.status.success());
+        let out = Command::new("git")
+            .args(["config", "--global", "init.defaultBranch", "main"])
+            .env("HOME", home.path())
+            .output()
+            .expect("git config");
+        assert!(out.status.success());
+        home
+    })
+    .path()
+}
 
 /// Create a temporary git repo with an initial commit, returning the TempDir
 /// (which keeps the directory alive) and the path to the repo root.
@@ -20,8 +52,6 @@ fn make_test_repo() -> (TempDir, PathBuf) {
     let root = tmp.path().to_path_buf();
 
     run_git(&root, &["init"]);
-    run_git(&root, &["config", "user.email", "test@cwt.dev"]);
-    run_git(&root, &["config", "user.name", "cwt-test"]);
 
     std::fs::write(root.join("README.md"), "# test repo\n").unwrap();
     run_git(&root, &["add", "."]);
@@ -35,6 +65,7 @@ fn run_git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
+        .env("HOME", test_home())
         .output()
         .expect("git command failed to start");
     assert!(
@@ -53,7 +84,7 @@ fn run_cwt(repo_root: &Path, args: &[&str]) -> (String, String, bool) {
     let out = Command::new(&bin)
         .args(args)
         .current_dir(repo_root)
-        .env("HOME", repo_root.parent().unwrap_or(repo_root))
+        .env("HOME", test_home())
         .output()
         .unwrap_or_else(|e| panic!("failed to run cwt binary at {}: {}", bin.display(), e));
 
@@ -118,6 +149,7 @@ fn test_create_worktree_with_name() {
     let out = Command::new("git")
         .args(["worktree", "list"])
         .current_dir(&root)
+        .env("HOME", test_home())
         .output()
         .unwrap();
     let wt_list = String::from_utf8_lossy(&out.stdout);
@@ -364,6 +396,7 @@ fn test_handoff_worktree_to_local() {
     let patch_out = Command::new("git")
         .args(["diff", "HEAD"])
         .current_dir(&wt_path)
+        .env("HOME", test_home())
         .output()
         .unwrap();
     let patch = String::from_utf8_lossy(&patch_out.stdout);
@@ -373,6 +406,7 @@ fn test_handoff_worktree_to_local() {
     let mut child = Command::new("git")
         .args(["apply", "--3way", "-"])
         .current_dir(&root)
+        .env("HOME", test_home())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -413,6 +447,7 @@ fn test_handoff_local_to_worktree() {
     let patch_out = Command::new("git")
         .args(["diff", "--cached"])
         .current_dir(&root)
+        .env("HOME", test_home())
         .output()
         .unwrap();
     let patch = String::from_utf8_lossy(&patch_out.stdout);
@@ -422,6 +457,7 @@ fn test_handoff_local_to_worktree() {
         let mut child = Command::new("git")
             .args(["apply", "--3way", "-"])
             .current_dir(&wt_path)
+            .env("HOME", test_home())
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -719,6 +755,7 @@ fn test_branch_naming_convention() {
     let out = Command::new("git")
         .args(["branch", "--list", "wt/feat-auth"])
         .current_dir(&root)
+        .env("HOME", test_home())
         .output()
         .unwrap();
     let branches = String::from_utf8_lossy(&out.stdout);
@@ -738,6 +775,7 @@ fn test_delete_removes_branch() {
     let out = Command::new("git")
         .args(["branch", "--list", "wt/del-branch"])
         .current_dir(&root)
+        .env("HOME", test_home())
         .output()
         .unwrap();
     let branches = String::from_utf8_lossy(&out.stdout);
