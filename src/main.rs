@@ -55,16 +55,45 @@ enum Commands {
     },
     /// Launch the interactive TUI
     Tui,
+    /// Manage Claude Code hooks integration
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksAction {
+    /// Install cwt hooks into the Claude Code configuration
+    Install,
+    /// Remove cwt hooks from the Claude Code configuration
+    Uninstall,
+    /// Show hook status and socket path
+    Status,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let cwd = std::env::current_dir().context("failed to get current directory")?;
-    let repo_root = git::commands::repo_root(&cwd).context("not in a git repository")?;
-    let config = config::load_config(&repo_root)?;
+    // For hooks status, we don't strictly need to be in a git repo
+    // but for consistency we still check.
 
-    let manager = Manager::new(repo_root, config);
+    let cwd = std::env::current_dir().context("failed to get current directory")?;
+
+    // Check if we're in a git repo — provide friendly error for TUI mode
+    let repo_root = match git::commands::repo_root(&cwd) {
+        Ok(root) => root,
+        Err(_) => {
+            eprintln!("error: not in a git repository");
+            eprintln!();
+            eprintln!("cwt manages git worktrees and must be run from within a git repository.");
+            eprintln!("  cd /path/to/your/repo && cwt");
+            std::process::exit(1);
+        }
+    };
+
+    let config = config::load_config(&repo_root)?;
+    let manager = Manager::new(repo_root.clone(), config);
 
     match cli.command {
         None | Some(Commands::Tui) => run_tui(manager)?,
@@ -75,12 +104,16 @@ fn main() -> Result<()> {
         Some(Commands::Delete { name }) => cmd_delete(&manager, &name)?,
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
+        Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
     }
 
     Ok(())
 }
 
 fn run_tui(manager: Manager) -> Result<()> {
+    // Startup checks
+    startup_checks()?;
+
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -91,6 +124,10 @@ fn run_tui(manager: Manager) -> Result<()> {
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
+
+    // Start hook socket listener
+    let hook_listener = hooks::socket::HookSocketListener::start(&manager.repo_root)
+        .ok(); // Non-fatal if socket fails
 
     // Create app
     let mut app = app::App::new(manager)?;
@@ -105,6 +142,14 @@ fn run_tui(manager: Manager) -> Result<()> {
 
         if app.should_quit {
             break;
+        }
+
+        // Process hook events (non-blocking)
+        if let Some(ref listener) = hook_listener {
+            let events = listener.drain_events();
+            for event in events {
+                app.handle_hook_event(event);
+            }
         }
 
         // Refresh session statuses periodically (every ~4 ticks = ~1 second)
@@ -123,6 +168,38 @@ fn run_tui(manager: Manager) -> Result<()> {
         crossterm::event::DisableMouseCapture
     )?;
     terminal.show_cursor()?;
+
+    // hook_listener is dropped here, which cleans up the socket file
+
+    Ok(())
+}
+
+/// Perform startup checks and provide friendly error messages.
+fn startup_checks() -> Result<()> {
+    // Check that git is available
+    if which::which("git").is_err() {
+        eprintln!("error: git not found on PATH");
+        eprintln!();
+        eprintln!("cwt requires git for worktree management.");
+        eprintln!("  Install git: https://git-scm.com/downloads");
+        std::process::exit(1);
+    }
+
+    // Check that tmux is available (warn but don't block)
+    if which::which("tmux").is_err() {
+        eprintln!("warning: tmux not found on PATH");
+        eprintln!("  Session launching requires tmux.");
+        eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
+        eprintln!();
+    }
+
+    // Check that claude is available (warn but don't block)
+    if which::which("claude").is_err() {
+        eprintln!("warning: claude not found on PATH");
+        eprintln!("  Session launching requires Claude Code CLI.");
+        eprintln!("  Install: https://docs.anthropic.com/en/docs/claude-code");
+        eprintln!();
+    }
 
     Ok(())
 }
@@ -191,6 +268,69 @@ fn cmd_gc(manager: &Manager, execute: bool) -> Result<()> {
         println!("\nDeleted {} worktree(s) (snapshots saved).", deleted.len());
     } else {
         println!("\nDry run — use --execute to actually delete.");
+    }
+
+    Ok(())
+}
+
+fn cmd_hooks(repo_root: &std::path::Path, action: HooksAction) -> Result<()> {
+    match action {
+        HooksAction::Install => {
+            hooks::install::install_hooks(repo_root)?;
+        }
+        HooksAction::Uninstall => {
+            hooks::install::uninstall_hooks(repo_root)?;
+        }
+        HooksAction::Status => {
+            let sock_path = hooks::socket::socket_path(repo_root);
+            let hooks_dir = repo_root.join(".cwt/hooks");
+            let settings_path = repo_root.join(".claude/settings.json");
+
+            println!("Hook status for {}", repo_root.display());
+            println!();
+
+            // Socket
+            if sock_path.exists() {
+                println!("  Socket: {} (active)", sock_path.display());
+            } else {
+                println!("  Socket: {} (inactive — TUI not running)", sock_path.display());
+            }
+
+            // Hook scripts
+            if hooks_dir.exists() {
+                let scripts: Vec<_> = std::fs::read_dir(&hooks_dir)?
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .starts_with("cwt-")
+                    })
+                    .collect();
+                if scripts.is_empty() {
+                    println!("  Hooks:  not installed");
+                } else {
+                    println!("  Hooks:  {} script(s) in {}", scripts.len(), hooks_dir.display());
+                    for s in &scripts {
+                        println!("          - {}", s.file_name().to_string_lossy());
+                    }
+                }
+            } else {
+                println!("  Hooks:  not installed");
+            }
+
+            // Settings.json
+            if settings_path.exists() {
+                let content = std::fs::read_to_string(&settings_path)?;
+                let has_cwt = content.contains("cwt-");
+                if has_cwt {
+                    println!("  Claude: settings.json patched");
+                } else {
+                    println!("  Claude: settings.json exists but no cwt hooks registered");
+                }
+            } else {
+                println!("  Claude: no .claude/settings.json found");
+            }
+        }
     }
 
     Ok(())

@@ -1,1 +1,3 @@
-// Hooks integration (placeholder for future Claude Code hooks registration)
+pub mod event;
+pub mod install;
+pub mod socket;
