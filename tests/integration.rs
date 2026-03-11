@@ -45,6 +45,25 @@ fn test_home() -> &'static Path {
     .path()
 }
 
+/// Create an isolated HOME directory with git config.
+/// Use this for tests that modify shared state (like forest.toml) to avoid races.
+fn make_isolated_home() -> TempDir {
+    let home = TempDir::new().expect("create isolated HOME");
+    for args in [
+        &["config", "--global", "user.email", "test@cwt.dev"][..],
+        &["config", "--global", "user.name", "cwt-test"],
+        &["config", "--global", "init.defaultBranch", "main"],
+    ] {
+        let out = Command::new("git")
+            .args(args)
+            .env("HOME", home.path())
+            .output()
+            .expect("git config");
+        assert!(out.status.success());
+    }
+    home
+}
+
 /// Create a temporary git repo with an initial commit, returning the TempDir
 /// (which keeps the directory alive) and the path to the repo root.
 fn make_test_repo() -> (TempDir, PathBuf) {
@@ -80,11 +99,17 @@ fn run_git(dir: &Path, args: &[&str]) {
 /// Run `cwt <args>` as a subprocess against the given repo root.
 /// Returns (stdout, stderr, success).
 fn run_cwt(repo_root: &Path, args: &[&str]) -> (String, String, bool) {
+    run_cwt_with_home(repo_root, args, test_home())
+}
+
+/// Run `cwt <args>` with a custom HOME directory.
+/// Returns (stdout, stderr, success).
+fn run_cwt_with_home(repo_root: &Path, args: &[&str], home: &Path) -> (String, String, bool) {
     let bin = cwt_binary();
     let out = Command::new(&bin)
         .args(args)
         .current_dir(repo_root)
-        .env("HOME", test_home())
+        .env("HOME", home)
         .output()
         .unwrap_or_else(|e| panic!("failed to run cwt binary at {}: {}", bin.display(), e));
 
@@ -815,9 +840,10 @@ fn test_state_reconciliation_after_manual_removal() {
 
 #[test]
 fn test_status_no_repos() {
+    let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    let (stdout, _stderr, ok) = run_cwt(&root, &["status"]);
+    let (stdout, _stderr, ok) = run_cwt_with_home(&root, &["status"], home.path());
     // With no repos registered, it should say so or show empty
     assert!(ok || _stderr.contains("No repos registered"));
     if ok {
@@ -831,9 +857,11 @@ fn test_status_no_repos() {
 
 #[test]
 fn test_add_repo() {
+    let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    let (stdout, _stderr, ok) = run_cwt(&root, &["add-repo", root.to_str().unwrap()]);
+    let (stdout, _stderr, ok) =
+        run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
     assert!(ok, "add-repo failed: {_stderr}");
     assert!(
         stdout.contains("Added repo") || stdout.contains("already registered"),
@@ -843,12 +871,14 @@ fn test_add_repo() {
 
 #[test]
 fn test_add_repo_duplicate() {
+    let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["add-repo", root.to_str().unwrap()]);
+    run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
 
     // Second add should indicate already registered
-    let (stdout, _stderr, ok) = run_cwt(&root, &["add-repo", root.to_str().unwrap()]);
+    let (stdout, _stderr, ok) =
+        run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
     assert!(ok);
     assert!(
         stdout.contains("already registered"),
