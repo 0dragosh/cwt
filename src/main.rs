@@ -5,6 +5,7 @@ mod config;
 mod forest;
 mod git;
 mod hooks;
+mod orchestration;
 mod session;
 mod state;
 mod tmux;
@@ -70,6 +71,29 @@ enum Commands {
     Forest,
     /// Show a summary of all registered repos and active sessions
     Status,
+    /// Dispatch multiple tasks in parallel: creates a worktree per task with Claude
+    Dispatch {
+        /// Task descriptions (one worktree per task)
+        tasks: Vec<String>,
+        /// Base branch to create worktrees from
+        #[arg(short, long, default_value = "main")]
+        base: String,
+    },
+    /// Import issues from GitHub or Linear and create worktrees
+    Import {
+        /// Import from GitHub issues
+        #[arg(long)]
+        github: bool,
+        /// Import from Linear issues
+        #[arg(long)]
+        linear: bool,
+        /// Maximum number of issues to import
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+        /// Base branch to create worktrees from
+        #[arg(short, long, default_value = "main")]
+        base: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -126,6 +150,10 @@ fn main() -> Result<()> {
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
         Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
+        Some(Commands::Dispatch { tasks, base }) => cmd_dispatch(&manager, &tasks, &base)?,
+        Some(Commands::Import { github, linear, limit, base }) => {
+            cmd_import(&manager, github, linear, limit, &base)?
+        }
         // Already handled above
         Some(Commands::AddRepo { .. }) | Some(Commands::Forest) | Some(Commands::Status) => {
             unreachable!()
@@ -182,6 +210,10 @@ fn run_tui(manager: Manager) -> Result<()> {
         if tick_count.is_multiple_of(4) {
             app.refresh();
             app.update_inspector();
+            // Update dashboard stats less frequently (every ~4 seconds)
+            if tick_count.is_multiple_of(16) {
+                app.update_dashboard();
+            }
         }
     }
 
@@ -359,6 +391,125 @@ fn cmd_hooks(repo_root: &std::path::Path, action: HooksAction) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn cmd_dispatch(manager: &Manager, tasks: &[String], base: &str) -> Result<()> {
+    if tasks.is_empty() {
+        eprintln!("No tasks provided. Usage: cwt dispatch \"task 1\" \"task 2\" ...");
+        std::process::exit(1);
+    }
+
+    // Check tmux
+    if !crate::tmux::pane::is_inside_tmux() {
+        eprintln!("error: cwt dispatch requires tmux");
+        eprintln!("  Run cwt inside a tmux session to dispatch tasks.");
+        std::process::exit(1);
+    }
+
+    println!("Dispatching {} task(s) on branch '{}'...\n", tasks.len(), base);
+
+    let results = orchestration::dispatch::dispatch_tasks(manager, tasks, base);
+
+    let mut success = 0;
+    let mut failed = 0;
+    for result in &results {
+        if let Some(ref err) = result.error {
+            eprintln!("  FAIL  {:20} {}", result.worktree_name, err);
+            failed += 1;
+        } else {
+            let pane = result.pane_id.as_deref().unwrap_or("?");
+            println!(
+                "  OK    {:20} (pane: {}) <- {}",
+                result.worktree_name,
+                pane,
+                truncate_cli(&result.task, 50)
+            );
+            success += 1;
+        }
+    }
+
+    println!("\n{} dispatched, {} failed.", success, failed);
+    Ok(())
+}
+
+fn cmd_import(
+    manager: &Manager,
+    github: bool,
+    linear: bool,
+    limit: usize,
+    base: &str,
+) -> Result<()> {
+    if !github && !linear {
+        eprintln!("Specify a source: --github or --linear");
+        std::process::exit(1);
+    }
+
+    // Check tmux
+    if !crate::tmux::pane::is_inside_tmux() {
+        eprintln!("error: cwt import requires tmux");
+        eprintln!("  Run cwt inside a tmux session to import issues.");
+        std::process::exit(1);
+    }
+
+    let (issues, source) = if github {
+        let issues =
+            orchestration::import::fetch_github_issues(&manager.repo_root, limit)?;
+        (issues, "GitHub")
+    } else {
+        let issues = orchestration::import::fetch_linear_issues(limit)?;
+        (issues, "Linear")
+    };
+
+    if issues.is_empty() {
+        println!("No open issues found on {}.", source);
+        return Ok(());
+    }
+
+    println!("Found {} {} issue(s):\n", issues.len(), source);
+    for issue in &issues {
+        let labels = if issue.labels.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", issue.labels.join(", "))
+        };
+        println!("  #{:<6} {}{}", issue.number, issue.title, labels);
+    }
+    println!();
+
+    println!("Creating worktrees and launching sessions...\n");
+
+    let results = orchestration::import::import_issues(manager, &issues, base, source);
+
+    let mut success = 0;
+    let mut failed = 0;
+    for result in &results {
+        if let Some(ref err) = result.error {
+            eprintln!(
+                "  FAIL  #{:<6} {:20} {}",
+                result.issue.number, result.worktree_name, err
+            );
+            failed += 1;
+        } else {
+            let pane = result.pane_id.as_deref().unwrap_or("?");
+            println!(
+                "  OK    #{:<6} {:20} (pane: {})",
+                result.issue.number, result.worktree_name, pane
+            );
+            success += 1;
+        }
+    }
+
+    println!("\n{} imported, {} failed.", success, failed);
+    Ok(())
+}
+
+/// Truncate a string for CLI display.
+fn truncate_cli(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    }
 }
 
 fn cmd_add_repo(path: &str) -> Result<()> {

@@ -52,13 +52,26 @@ pub fn forest_layout(area: Rect) -> (Rect, Rect, Rect, Rect, Rect) {
     (outer[0], panels[0], panels[1], panels[2], outer[2])
 }
 
-/// Render the top bar with project name and notification badges.
+/// Render the top bar with project name, notification badges, and aggregate stats.
 pub fn render_top_bar(
     f: &mut Frame,
     area: Rect,
     repo_root: &Path,
     waiting_count: usize,
     done_count: usize,
+) {
+    render_top_bar_with_stats(f, area, repo_root, waiting_count, done_count, None, None);
+}
+
+/// Render the top bar with optional aggregate token/cost stats.
+pub fn render_top_bar_with_stats(
+    f: &mut Frame,
+    area: Rect,
+    repo_root: &Path,
+    waiting_count: usize,
+    done_count: usize,
+    total_tokens: Option<(u64, u64)>,
+    total_cost: Option<f64>,
 ) {
     let project_name = repo_root
         .file_name()
@@ -109,9 +122,46 @@ pub fn render_top_bar(
         ));
     }
 
+    // Aggregate token/cost stats
+    if let Some((input_t, output_t)) = total_tokens {
+        if input_t > 0 || output_t > 0 {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!(
+                    " {}in/{}out ",
+                    format_top_bar_tokens(input_t),
+                    format_top_bar_tokens(output_t),
+                ),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    if let Some(cost) = total_cost {
+        if cost > 0.0 {
+            spans.push(Span::styled(
+                format!(" ${:.2} ", cost),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green),
+            ));
+        }
+    }
+
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
     f.render_widget(bar, area);
+}
+
+/// Format token count compactly for the top bar.
+fn format_top_bar_tokens(count: u64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        format!("{}", count)
+    }
 }
 
 /// Render the forest mode top bar with global dashboard stats.

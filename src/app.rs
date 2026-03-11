@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::git;
 use crate::hooks::event::HookEvent;
+use crate::orchestration;
 use crate::session;
 use crate::ui;
 use crate::worktree::handoff::{self, HandoffDirection};
@@ -24,6 +25,8 @@ pub enum ActiveDialog {
     Handoff(ui::dialogs::handoff::HandoffDialog),
     Gc(ui::dialogs::gc::GcDialog),
     Restore(ui::dialogs::restore::RestoreDialog),
+    Dispatch(ui::dialogs::dispatch::DispatchDialog),
+    Broadcast(ui::dialogs::broadcast::BroadcastDialog),
     Help,
 }
 
@@ -51,6 +54,8 @@ pub struct App {
     pub waiting_count: usize,
     /// Count of worktrees in "done" state that haven't been acknowledged.
     pub done_count: usize,
+    /// Aggregate dashboard stats across all sessions.
+    pub dashboard: orchestration::dashboard::AggregateStats,
     /// Track the areas for mouse click handling.
     pub last_list_area: Option<ratatui::layout::Rect>,
 }
@@ -77,11 +82,13 @@ impl App {
             should_quit: false,
             waiting_count: 0,
             done_count: 0,
+            dashboard: orchestration::dashboard::AggregateStats::default(),
             last_list_area: None,
         };
 
         app.update_inspector();
         app.update_badge_counts();
+        app.update_dashboard();
         Ok(app)
     }
 
@@ -142,6 +149,15 @@ impl App {
             .iter()
             .filter(|wt| wt.status == WorktreeStatus::Done)
             .count();
+    }
+
+    /// Update aggregate dashboard stats across all sessions.
+    pub fn update_dashboard(&mut self) {
+        let manager = &self.manager;
+        self.dashboard = orchestration::dashboard::compute_aggregate_stats(
+            &self.worktrees,
+            |wt| manager.worktree_abs_path(wt),
+        );
     }
 
     /// Handle a hook event received from the Unix socket.
@@ -289,13 +305,25 @@ impl App {
         // Store list area for mouse click handling
         self.last_list_area = Some(list_area);
 
-        // Render the top bar with notification badges
-        ui::layout::render_top_bar(
+        // Render the top bar with notification badges and aggregate stats
+        let total_tokens = if self.dashboard.total_input_tokens > 0
+            || self.dashboard.total_output_tokens > 0
+        {
+            Some((
+                self.dashboard.total_input_tokens,
+                self.dashboard.total_output_tokens,
+            ))
+        } else {
+            None
+        };
+        ui::layout::render_top_bar_with_stats(
             frame,
             top_bar_area,
             &self.manager.repo_root,
             self.waiting_count,
             self.done_count,
+            total_tokens,
+            self.dashboard.total_cost_usd,
         );
 
         // Render the worktree list
@@ -335,6 +363,8 @@ impl App {
             ActiveDialog::Handoff(d) => ui::dialogs::handoff::render(frame, d),
             ActiveDialog::Gc(d) => ui::dialogs::gc::render(frame, d),
             ActiveDialog::Restore(d) => ui::dialogs::restore::render(frame, d),
+            ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
+            ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
             ActiveDialog::Help => ui::help::render(frame),
         }
     }
@@ -423,6 +453,8 @@ impl App {
             ActiveDialog::Handoff(_) => self.handle_handoff_key(key),
             ActiveDialog::Gc(_) => self.handle_gc_key(key),
             ActiveDialog::Restore(_) => self.handle_restore_key(key),
+            ActiveDialog::Dispatch(_) => self.handle_dispatch_key(key),
+            ActiveDialog::Broadcast(_) => self.handle_broadcast_key(key),
         }
     }
 
@@ -480,6 +512,12 @@ impl App {
             }
             KeyCode::Char('r') => {
                 self.open_restore_dialog()?;
+            }
+            KeyCode::Char('t') => {
+                self.open_dispatch_dialog()?;
+            }
+            KeyCode::Char('b') => {
+                self.open_broadcast_dialog()?;
             }
             KeyCode::Enter => {
                 self.open_shell()?;
@@ -982,6 +1020,175 @@ impl App {
         Ok(())
     }
 
+    fn open_dispatch_dialog(&mut self) -> Result<()> {
+        let branches: Vec<String> = git::branch::list_branches(&self.manager.repo_root)?
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        let dialog = ui::dialogs::dispatch::DispatchDialog::new(branches);
+        self.dialog = ActiveDialog::Dispatch(dialog);
+        Ok(())
+    }
+
+    fn open_broadcast_dialog(&mut self) -> Result<()> {
+        let running: Vec<String> = self
+            .worktrees
+            .iter()
+            .filter(|wt| wt.status == WorktreeStatus::Running && wt.tmux_pane.is_some())
+            .map(|wt| wt.name.clone())
+            .collect();
+        let count = running.len();
+
+        if count == 0 {
+            self.status_message = "No running sessions to broadcast to".to_string();
+            return Ok(());
+        }
+
+        let dialog = ui::dialogs::broadcast::BroadcastDialog::new(count, running);
+        self.dialog = ActiveDialog::Broadcast(dialog);
+        Ok(())
+    }
+
+    /// Handle keys in the dispatch dialog.
+    fn handle_dispatch_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Dispatch(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            KeyCode::Tab => {
+                // If we're on the input field and there's text, add it as a task first
+                if dialog.focus == 0 && !dialog.current_input.trim().is_empty() {
+                    dialog.add_task();
+                }
+                dialog.next_field();
+            }
+            KeyCode::BackTab => {
+                dialog.prev_field();
+            }
+            KeyCode::Enter => {
+                if dialog.focus == 0 {
+                    // Add current input as a task
+                    dialog.add_task();
+                } else if dialog.focus == 2 {
+                    // Confirm dispatch
+                    // First add any pending input
+                    if !dialog.current_input.trim().is_empty() {
+                        dialog.add_task();
+                    }
+                    if !dialog.tasks.is_empty() {
+                        dialog.confirmed = true;
+                    }
+                } else {
+                    dialog.next_field();
+                }
+            }
+            KeyCode::Left if dialog.focus == 1 => {
+                dialog.prev_branch();
+            }
+            KeyCode::Right if dialog.focus == 1 => {
+                dialog.next_branch();
+            }
+            KeyCode::Backspace if dialog.focus == 0 => {
+                if dialog.current_input.is_empty() {
+                    dialog.remove_last_task();
+                } else {
+                    dialog.current_input.pop();
+                }
+            }
+            KeyCode::Char(c) if dialog.focus == 0 => {
+                dialog.current_input.push(c);
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            let tasks = dialog_clone.tasks;
+            let base = dialog_clone.base_branch;
+
+            if tasks.is_empty() {
+                self.status_message = "No tasks to dispatch".to_string();
+            } else {
+                let results =
+                    orchestration::dispatch::dispatch_tasks(&self.manager, &tasks, &base);
+                let success_count = results.iter().filter(|r| r.error.is_none()).count();
+                let fail_count = results.iter().filter(|r| r.error.is_some()).count();
+
+                if fail_count == 0 {
+                    self.status_message =
+                        format!("Dispatched {} task(s) successfully", success_count);
+                } else {
+                    self.status_message = format!(
+                        "Dispatched {} task(s), {} failed",
+                        success_count, fail_count
+                    );
+                }
+
+                self.refresh();
+                self.update_inspector();
+                self.update_dashboard();
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
+        }
+
+        Ok(())
+    }
+
+    /// Handle keys in the broadcast dialog.
+    fn handle_broadcast_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Broadcast(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            KeyCode::Enter => {
+                if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 {
+                    dialog.confirmed = true;
+                }
+            }
+            KeyCode::Backspace => {
+                dialog.prompt_input.pop();
+            }
+            KeyCode::Char(c) => {
+                dialog.prompt_input.push(c);
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            let prompt = dialog_clone.prompt_input.trim().to_string();
+            let results =
+                orchestration::broadcast::broadcast_prompt(&self.worktrees, &prompt);
+            let success_count = results.iter().filter(|r| r.success).count();
+            let fail_count = results.iter().filter(|r| !r.success).count();
+
+            if fail_count == 0 {
+                self.status_message =
+                    format!("Broadcast sent to {} session(s)", success_count);
+            } else {
+                self.status_message = format!(
+                    "Broadcast: {} sent, {} failed",
+                    success_count, fail_count
+                );
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
+        }
+
+        Ok(())
+    }
+
     fn open_shell(&mut self) -> Result<()> {
         let Some(wt) = self.selected_worktree() else {
             self.status_message = "No worktree selected".to_string();
@@ -1368,6 +1575,8 @@ impl ForestApp {
             ActiveDialog::Handoff(d) => ui::dialogs::handoff::render(frame, d),
             ActiveDialog::Gc(d) => ui::dialogs::gc::render(frame, d),
             ActiveDialog::Restore(d) => ui::dialogs::restore::render(frame, d),
+            ActiveDialog::Dispatch(d) => ui::dialogs::dispatch::render(frame, d),
+            ActiveDialog::Broadcast(d) => ui::dialogs::broadcast::render(frame, d),
             ActiveDialog::Help => ui::help::render(frame),
         }
     }
@@ -1477,6 +1686,8 @@ impl ForestApp {
             ActiveDialog::Handoff(_) => self.handle_handoff_key(key),
             ActiveDialog::Gc(_) => self.handle_gc_key(key),
             ActiveDialog::Restore(_) => self.handle_restore_key(key),
+            ActiveDialog::Dispatch(_) => self.handle_dispatch_key(key),
+            ActiveDialog::Broadcast(_) => self.handle_broadcast_key(key),
         }
     }
 
@@ -1559,6 +1770,12 @@ impl ForestApp {
             }
             KeyCode::Char('r') => {
                 self.open_restore_dialog()?;
+            }
+            KeyCode::Char('t') => {
+                self.open_dispatch_dialog()?;
+            }
+            KeyCode::Char('b') => {
+                self.open_broadcast_dialog()?;
             }
             KeyCode::Esc => {
                 if !self.filter.is_empty() {
@@ -2120,6 +2337,182 @@ impl ForestApp {
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
             }
+        }
+
+        Ok(())
+    }
+
+    fn open_dispatch_dialog(&mut self) -> Result<()> {
+        let Some(repo) = self.selected_repo() else {
+            self.status_message = "No repo selected".to_string();
+            return Ok(());
+        };
+        let branches: Vec<String> = git::branch::list_branches(&repo.manager.repo_root)?
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        let dialog = ui::dialogs::dispatch::DispatchDialog::new(branches);
+        self.dialog = ActiveDialog::Dispatch(dialog);
+        Ok(())
+    }
+
+    fn open_broadcast_dialog(&mut self) -> Result<()> {
+        let Some(repo) = self.selected_repo() else {
+            self.status_message = "No repo selected".to_string();
+            return Ok(());
+        };
+        let running: Vec<String> = repo
+            .worktrees
+            .iter()
+            .filter(|wt| wt.status == WorktreeStatus::Running && wt.tmux_pane.is_some())
+            .map(|wt| wt.name.clone())
+            .collect();
+        let count = running.len();
+
+        if count == 0 {
+            self.status_message = "No running sessions to broadcast to".to_string();
+            return Ok(());
+        }
+
+        let dialog = ui::dialogs::broadcast::BroadcastDialog::new(count, running);
+        self.dialog = ActiveDialog::Broadcast(dialog);
+        Ok(())
+    }
+
+    /// Handle keys in the dispatch dialog.
+    fn handle_dispatch_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Dispatch(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            KeyCode::Tab => {
+                if dialog.focus == 0 && !dialog.current_input.trim().is_empty() {
+                    dialog.add_task();
+                }
+                dialog.next_field();
+            }
+            KeyCode::BackTab => {
+                dialog.prev_field();
+            }
+            KeyCode::Enter => {
+                if dialog.focus == 0 {
+                    dialog.add_task();
+                } else if dialog.focus == 2 {
+                    if !dialog.current_input.trim().is_empty() {
+                        dialog.add_task();
+                    }
+                    if !dialog.tasks.is_empty() {
+                        dialog.confirmed = true;
+                    }
+                } else {
+                    dialog.next_field();
+                }
+            }
+            KeyCode::Left if dialog.focus == 1 => {
+                dialog.prev_branch();
+            }
+            KeyCode::Right if dialog.focus == 1 => {
+                dialog.next_branch();
+            }
+            KeyCode::Backspace if dialog.focus == 0 => {
+                if dialog.current_input.is_empty() {
+                    dialog.remove_last_task();
+                } else {
+                    dialog.current_input.pop();
+                }
+            }
+            KeyCode::Char(c) if dialog.focus == 0 => {
+                dialog.current_input.push(c);
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            let tasks = dialog_clone.tasks;
+            let base = dialog_clone.base_branch;
+
+            if tasks.is_empty() {
+                self.status_message = "No tasks to dispatch".to_string();
+            } else if let Some(repo) = self.selected_repo() {
+                let results =
+                    orchestration::dispatch::dispatch_tasks(&repo.manager, &tasks, &base);
+                let success_count = results.iter().filter(|r| r.error.is_none()).count();
+                let fail_count = results.iter().filter(|r| r.error.is_some()).count();
+
+                if fail_count == 0 {
+                    self.status_message =
+                        format!("Dispatched {} task(s) successfully", success_count);
+                } else {
+                    self.status_message = format!(
+                        "Dispatched {} task(s), {} failed",
+                        success_count, fail_count
+                    );
+                }
+
+                self.refresh();
+                self.update_inspector();
+            } else {
+                self.status_message = "No repo selected".to_string();
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
+        }
+
+        Ok(())
+    }
+
+    /// Handle keys in the broadcast dialog.
+    fn handle_broadcast_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Broadcast(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            KeyCode::Enter => {
+                if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 {
+                    dialog.confirmed = true;
+                }
+            }
+            KeyCode::Backspace => {
+                dialog.prompt_input.pop();
+            }
+            KeyCode::Char(c) => {
+                dialog.prompt_input.push(c);
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            let prompt = dialog_clone.prompt_input.trim().to_string();
+            if let Some(repo) = self.selected_repo() {
+                let results =
+                    orchestration::broadcast::broadcast_prompt(&repo.worktrees, &prompt);
+                let success_count = results.iter().filter(|r| r.success).count();
+                let fail_count = results.iter().filter(|r| !r.success).count();
+
+                if fail_count == 0 {
+                    self.status_message =
+                        format!("Broadcast sent to {} session(s)", success_count);
+                } else {
+                    self.status_message = format!(
+                        "Broadcast: {} sent, {} failed",
+                        success_count, fail_count
+                    );
+                }
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
         }
 
         Ok(())
