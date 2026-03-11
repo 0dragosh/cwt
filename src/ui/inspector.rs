@@ -25,6 +25,7 @@ pub fn render(
     worktree: Option<&Worktree>,
     info: &InspectorInfo,
     focused: bool,
+    scroll_offset: u16,
 ) {
     let border_style = if focused {
         theme::title_style()
@@ -44,8 +45,16 @@ pub fn render(
         return;
     };
 
+    let scroll_hint = if focused && scroll_offset > 0 {
+        format!(" {} [scroll: {}] ", wt.name, scroll_offset)
+    } else if focused {
+        format!(" {} [j/k to scroll] ", wt.name)
+    } else {
+        format!(" {} ", wt.name)
+    };
+
     let block = Block::default()
-        .title(format!(" {} ", wt.name))
+        .title(scroll_hint)
         .borders(Borders::ALL)
         .border_style(border_style);
 
@@ -151,11 +160,13 @@ pub fn render(
     f.render_widget(meta, chunks[0]);
 
     // Separator
-    let sep = Paragraph::new("─".repeat(chunks[1].width as usize))
-        .style(Style::default().fg(ratatui::style::Color::DarkGray));
+    let sep = Paragraph::new(
+        "─".repeat(chunks[1].width as usize)
+    )
+    .style(Style::default().fg(ratatui::style::Color::DarkGray));
     f.render_widget(sep, chunks[1]);
 
-    // Diff stat + last message section
+    // Diff stat + last message section (scrollable)
     let mut detail_lines = Vec::new();
 
     if !info.diff_stat_text.is_empty() {
@@ -183,7 +194,7 @@ pub fn render(
             "Last message:",
             theme::help_key_style(),
         )));
-        for line in info.last_message.lines().take(10) {
+        for line in info.last_message.lines() {
             detail_lines.push(Line::from(line.to_string()));
         }
     }
@@ -195,7 +206,9 @@ pub fn render(
         )));
     }
 
-    let details = Paragraph::new(detail_lines).wrap(Wrap { trim: false });
+    let details = Paragraph::new(detail_lines)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_offset, 0));
     f.render_widget(details, chunks[2]);
 }
 

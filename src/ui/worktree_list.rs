@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::Frame;
@@ -15,13 +15,15 @@ pub fn render(
     list_state: &mut ListState,
     focused: bool,
     filter: &str,
+    filter_mode: bool,
 ) {
+    let filter_lower = filter.to_lowercase();
     let filtered: Vec<&Worktree> = if filter.is_empty() {
         worktrees.iter().collect()
     } else {
         worktrees
             .iter()
-            .filter(|wt| wt.name.contains(filter))
+            .filter(|wt| wt.name.to_lowercase().contains(&filter_lower))
             .collect()
     };
 
@@ -50,24 +52,62 @@ pub fn render(
                 }
             };
 
-            let name = Span::styled(
-                format!(" {}", wt.name),
-                Style::default().add_modifier(Modifier::BOLD),
-            );
+            let name_text = format!(" {}", wt.name);
+
+            // Highlight matching portion of the name when filtering
+            let name_span = if !filter.is_empty() {
+                let name_lower = wt.name.to_lowercase();
+                if let Some(pos) = name_lower.find(&filter_lower) {
+                    // Show the name with the matched portion highlighted
+                    let pre = &format!(" {}", &wt.name)[..pos + 1];
+                    let matched = &wt.name[pos..pos + filter.len()];
+                    let post = &wt.name[pos + filter.len()..];
+
+                    // Return multiple spans combined in a vec
+                    vec![
+                        Span::styled(
+                            pre.to_string(),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            matched.to_string(),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                        ),
+                        Span::styled(
+                            post.to_string(),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                    ]
+                } else {
+                    vec![Span::styled(
+                        name_text,
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]
+                }
+            } else {
+                vec![Span::styled(
+                    name_text,
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]
+            };
 
             let branch = Span::styled(
                 format!("  {}", wt.branch),
-                Style::default().fg(ratatui::style::Color::DarkGray),
+                Style::default().fg(Color::DarkGray),
             );
 
-            let line = Line::from(vec![
+            let mut line_spans = vec![
                 Span::raw(" "),
                 status_icon,
                 Span::raw(" "),
                 lifecycle_icon,
-                name,
-                branch,
-            ]);
+            ];
+            line_spans.extend(name_span);
+            line_spans.push(branch);
+
+            let line = Line::from(line_spans);
 
             ListItem::new(line)
         })
@@ -79,10 +119,12 @@ pub fn render(
         Style::default()
     };
 
-    let title = if filter.is_empty() {
-        format!(" Worktrees ({}) ", filtered.len())
-    } else {
+    let title = if filter_mode {
+        format!(" Worktrees ({}) [/{}|] ", filtered.len(), filter)
+    } else if !filter.is_empty() {
         format!(" Worktrees ({}) [/{}] ", filtered.len(), filter)
+    } else {
+        format!(" Worktrees ({}) ", filtered.len())
     };
 
     let block = Block::default()

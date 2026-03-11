@@ -1,9 +1,10 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::widgets::ListState;
 use std::time::Duration;
 
 use crate::git;
+use crate::hooks::event::HookEvent;
 use crate::session;
 use crate::ui;
 use crate::worktree::handoff::{self, HandoffDirection};
@@ -40,7 +41,14 @@ pub struct App {
     pub filter_mode: bool,
     pub status_message: String,
     pub inspector_info: ui::inspector::InspectorInfo,
+    pub inspector_scroll: u16,
     pub should_quit: bool,
+    /// Count of worktrees in "waiting" state (for notification badge).
+    pub waiting_count: usize,
+    /// Count of worktrees in "done" state that haven't been acknowledged.
+    pub done_count: usize,
+    /// Track the areas for mouse click handling.
+    pub last_list_area: Option<ratatui::layout::Rect>,
 }
 
 impl App {
@@ -61,10 +69,15 @@ impl App {
             filter_mode: false,
             status_message: String::new(),
             inspector_info: ui::inspector::InspectorInfo::default(),
+            inspector_scroll: 0,
             should_quit: false,
+            waiting_count: 0,
+            done_count: 0,
+            last_list_area: None,
         };
 
         app.update_inspector();
+        app.update_badge_counts();
         Ok(app)
     }
 
@@ -108,6 +121,104 @@ impl App {
                 }
                 let _ = self.manager.save_state(&state);
             }
+
+            self.update_badge_counts();
+        }
+    }
+
+    /// Update the notification badge counts.
+    fn update_badge_counts(&mut self) {
+        self.waiting_count = self
+            .worktrees
+            .iter()
+            .filter(|wt| wt.status == WorktreeStatus::Waiting)
+            .count();
+        self.done_count = self
+            .worktrees
+            .iter()
+            .filter(|wt| wt.status == WorktreeStatus::Done)
+            .count();
+    }
+
+    /// Handle a hook event received from the Unix socket.
+    pub fn handle_hook_event(&mut self, event: HookEvent) {
+        match event {
+            HookEvent::WorktreeCreated { worktree, .. } => {
+                self.status_message = format!("Worktree '{}' created externally", worktree);
+                self.refresh();
+                self.update_inspector();
+            }
+            HookEvent::WorktreeRemoved { worktree, .. } => {
+                self.status_message =
+                    format!("Worktree '{}' removed externally", worktree);
+                self.refresh();
+                self.clamp_selection();
+                self.update_inspector();
+            }
+            HookEvent::SessionStopped {
+                worktree,
+                session_id,
+                ..
+            } => {
+                // Update the worktree status to Done
+                if let Some(wt) = self
+                    .worktrees
+                    .iter_mut()
+                    .find(|wt| wt.name == worktree)
+                {
+                    wt.status = WorktreeStatus::Done;
+                    if let Some(sid) = session_id {
+                        wt.last_session_id = Some(sid);
+                    }
+                }
+                self.status_message =
+                    format!("Session stopped for '{}'", worktree);
+                self.update_badge_counts();
+                self.update_inspector();
+
+                // Persist status change
+                self.persist_status_change(&worktree, WorktreeStatus::Done);
+            }
+            HookEvent::SessionNotification {
+                worktree, message, ..
+            } => {
+                // Update the worktree status to Waiting
+                if let Some(wt) = self
+                    .worktrees
+                    .iter_mut()
+                    .find(|wt| wt.name == worktree)
+                {
+                    wt.status = WorktreeStatus::Waiting;
+                }
+                let msg = message.unwrap_or_default();
+                self.status_message = if msg.is_empty() {
+                    format!("'{}' is waiting for input", worktree)
+                } else {
+                    format!("'{}': {}", worktree, msg)
+                };
+                self.update_badge_counts();
+                self.update_inspector();
+
+                // Persist status change
+                self.persist_status_change(&worktree, WorktreeStatus::Waiting);
+            }
+            HookEvent::SubagentStopped { worktree, .. } => {
+                self.status_message =
+                    format!("Subagent stopped in '{}'", worktree);
+                // Refresh to pick up any state changes
+                self.refresh();
+                self.update_inspector();
+            }
+        }
+    }
+
+    /// Persist a status change for a worktree to state.json (best-effort).
+    fn persist_status_change(&self, worktree_name: &str, status: WorktreeStatus) {
+        if let Ok(mut state) = self.manager.load_state() {
+            if let Some(stored) = state.worktrees.get_mut(worktree_name) {
+                stored.status = status;
+            }
+            let _ = self.manager.save_state(&state);
         }
     }
 
@@ -122,9 +233,10 @@ impl App {
         if self.filter.is_empty() {
             self.worktrees.iter().collect()
         } else {
+            let filter_lower = self.filter.to_lowercase();
             self.worktrees
                 .iter()
-                .filter(|wt| wt.name.contains(&self.filter))
+                .filter(|wt| wt.name.to_lowercase().contains(&filter_lower))
                 .collect()
         }
     }
@@ -161,11 +273,26 @@ impl App {
         };
 
         self.inspector_info = info;
+        // Reset scroll when changing worktree
+        self.inspector_scroll = 0;
     }
 
     /// Render the full UI.
     pub fn draw(&mut self, frame: &mut ratatui::Frame) {
-        let (list_area, inspector_area, status_area) = ui::layout::main_layout(frame.area());
+        let (top_bar_area, list_area, inspector_area, status_area) =
+            ui::layout::main_layout(frame.area());
+
+        // Store list area for mouse click handling
+        self.last_list_area = Some(list_area);
+
+        // Render the top bar with notification badges
+        ui::layout::render_top_bar(
+            frame,
+            top_bar_area,
+            &self.manager.repo_root,
+            self.waiting_count,
+            self.done_count,
+        );
 
         // Render the worktree list
         ui::worktree_list::render(
@@ -175,6 +302,7 @@ impl App {
             &mut self.list_state,
             self.focus == FocusPanel::WorktreeList,
             &self.filter,
+            self.filter_mode,
         );
 
         // Render the inspector
@@ -184,6 +312,7 @@ impl App {
             self.selected_worktree(),
             &self.inspector_info,
             self.focus == FocusPanel::Inspector,
+            self.inspector_scroll,
         );
 
         // Render the status bar
@@ -209,11 +338,59 @@ impl App {
     /// Handle a single tick: poll for events and process them.
     pub fn tick(&mut self) -> Result<()> {
         if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                self.handle_key(key)?;
+            match event::read()? {
+                Event::Key(key) => {
+                    self.handle_key(key)?;
+                }
+                Event::Mouse(mouse) => {
+                    self.handle_mouse(mouse);
+                }
+                _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Handle mouse events.
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Check if click is in the worktree list area
+                if let Some(list_area) = self.last_list_area {
+                    if mouse.column >= list_area.x
+                        && mouse.column < list_area.x + list_area.width
+                        && mouse.row >= list_area.y
+                        && mouse.row < list_area.y + list_area.height
+                    {
+                        // Calculate which item was clicked
+                        // Account for the border (1 row at top)
+                        let relative_row = mouse.row.saturating_sub(list_area.y + 1);
+                        let filtered = self.filtered_worktrees();
+                        let index = relative_row as usize;
+                        if index < filtered.len() {
+                            self.list_state.select(Some(index));
+                            self.focus = FocusPanel::WorktreeList;
+                            self.update_inspector();
+                        }
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if self.focus == FocusPanel::Inspector {
+                    self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
+                } else {
+                    self.move_selection(-1);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if self.focus == FocusPanel::Inspector {
+                    self.inspector_scroll = self.inspector_scroll.saturating_add(1);
+                } else {
+                    self.move_selection(1);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Route key events to the appropriate handler.
@@ -255,10 +432,18 @@ impl App {
                 self.dialog = ActiveDialog::Help;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.move_selection(1);
+                if self.focus == FocusPanel::Inspector {
+                    self.inspector_scroll = self.inspector_scroll.saturating_add(1);
+                } else {
+                    self.move_selection(1);
+                }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.move_selection(-1);
+                if self.focus == FocusPanel::Inspector {
+                    self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
+                } else {
+                    self.move_selection(-1);
+                }
             }
             KeyCode::Tab => {
                 self.focus = match self.focus {
@@ -295,6 +480,14 @@ impl App {
             KeyCode::Enter => {
                 self.open_shell()?;
             }
+            KeyCode::Esc => {
+                // Clear filter if active
+                if !self.filter.is_empty() {
+                    self.filter.clear();
+                    self.status_message.clear();
+                    self.clamp_selection();
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -307,20 +500,25 @@ impl App {
                 self.filter_mode = false;
                 self.filter.clear();
                 self.status_message.clear();
+                self.clamp_selection();
             }
             KeyCode::Enter => {
                 self.filter_mode = false;
-                self.status_message.clear();
+                if self.filter.is_empty() {
+                    self.status_message.clear();
+                } else {
+                    self.status_message = format!("Filter active: {} (Esc to clear)", self.filter);
+                }
                 // Keep filter active
             }
             KeyCode::Backspace => {
                 self.filter.pop();
-                self.status_message = format!("Filter: {}", self.filter);
+                self.status_message = format!("Filter: {}_", self.filter);
                 self.clamp_selection();
             }
             KeyCode::Char(c) => {
                 self.filter.push(c);
-                self.status_message = format!("Filter: {}", self.filter);
+                self.status_message = format!("Filter: {}_", self.filter);
                 self.clamp_selection();
             }
             _ => {}
@@ -468,8 +666,8 @@ impl App {
                 ) {
                     Ok(()) => {
                         let dir_str = match dialog_clone.direction {
-                            HandoffDirection::WorktreeToLocal => "worktree → local",
-                            HandoffDirection::LocalToWorktree => "local → worktree",
+                            HandoffDirection::WorktreeToLocal => "worktree -> local",
+                            HandoffDirection::LocalToWorktree => "local -> worktree",
                         };
                         self.status_message = format!("Handoff complete ({})", dir_str);
                         self.update_inspector();
