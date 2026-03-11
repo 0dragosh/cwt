@@ -1,3 +1,4 @@
+pub mod handoff;
 pub mod manager;
 pub mod model;
 pub mod slug;
