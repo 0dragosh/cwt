@@ -59,7 +59,7 @@ pub fn render(f: &mut Frame, dialog: &RestoreDialog) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // header
-            Constraint::Min(8),   // snapshot list
+            Constraint::Min(8),    // snapshot list
             Constraint::Length(3), // details
             Constraint::Length(2), // buttons
         ])
@@ -67,8 +67,8 @@ pub fn render(f: &mut Frame, dialog: &RestoreDialog) {
         .split(inner);
 
     if dialog.snapshots.is_empty() {
-        let msg = Paragraph::new("No snapshots available.")
-            .style(Style::default().fg(Color::DarkGray));
+        let msg =
+            Paragraph::new("No snapshots available.").style(Style::default().fg(Color::DarkGray));
         f.render_widget(msg, chunks[0]);
 
         let buttons = Line::from(vec![Span::styled(

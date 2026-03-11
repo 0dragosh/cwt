@@ -29,7 +29,12 @@ impl DispatchDialog {
             .iter()
             .find(|b| *b == "main" || *b == "master")
             .cloned()
-            .unwrap_or_else(|| branches.first().cloned().unwrap_or_else(|| "main".to_string()));
+            .unwrap_or_else(|| {
+                branches
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string())
+            });
 
         let branch_index = branches
             .iter()
@@ -119,23 +124,21 @@ pub fn render(f: &mut Frame, dialog: &DispatchDialog) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),                  // instructions
+            Constraint::Length(1),                   // instructions
             Constraint::Length(task_display_height), // task list
-            Constraint::Length(2),                  // current input
-            Constraint::Length(2),                  // branch selector
-            Constraint::Length(1),                  // spacer
-            Constraint::Length(1),                  // buttons
+            Constraint::Length(2),                   // current input
+            Constraint::Length(2),                   // branch selector
+            Constraint::Length(1),                   // spacer
+            Constraint::Length(1),                   // buttons
         ])
         .margin(1)
         .split(inner);
 
     // Instructions
-    let instructions = Line::from(vec![
-        Span::styled(
-            "Enter tasks one per line. Press Enter to add each task.",
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]);
+    let instructions = Line::from(vec![Span::styled(
+        "Enter tasks one per line. Press Enter to add each task.",
+        Style::default().fg(Color::DarkGray),
+    )]);
     f.render_widget(Paragraph::new(instructions), chunks[0]);
 
     // Task list
@@ -147,10 +150,7 @@ pub fn render(f: &mut Frame, dialog: &DispatchDialog) {
             task.clone()
         };
         task_lines_vec.push(Line::from(vec![
-            Span::styled(
-                format!("  {}. ", i + 1),
-                Style::default().fg(Color::Cyan),
-            ),
+            Span::styled(format!("  {}. ", i + 1), Style::default().fg(Color::Cyan)),
             Span::raw(truncated),
         ]));
     }

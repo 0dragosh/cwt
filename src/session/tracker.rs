@@ -98,11 +98,7 @@ pub fn find_project_dir(worktree_path: &Path) -> Result<Option<PathBuf>> {
                 .and_then(|m| m.modified())
                 .unwrap_or(std::time::UNIX_EPOCH);
 
-            if best_match
-                .as_ref()
-                .map(|(_, t)| mtime > *t)
-                .unwrap_or(true)
-            {
+            if best_match.as_ref().map(|(_, t)| mtime > *t).unwrap_or(true) {
                 best_match = Some((entry.path(), mtime));
             }
         }

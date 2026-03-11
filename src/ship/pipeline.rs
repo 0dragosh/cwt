@@ -49,10 +49,7 @@ pub fn ship(worktree: &Worktree, worktree_path: &Path) -> Result<ShipResult> {
 
 /// Poll PR + CI status for a worktree, returning updated fields.
 /// This is intended to be called periodically from the refresh loop.
-pub fn poll_status(
-    repo_path: &Path,
-    worktree: &Worktree,
-) -> (PrStatus, CiStatus, Option<String>) {
+pub fn poll_status(repo_path: &Path, worktree: &Worktree) -> (PrStatus, CiStatus, Option<String>) {
     let pr_number = worktree.pr_number.unwrap_or(0);
     if pr_number == 0 {
         return (PrStatus::None, CiStatus::None, None);

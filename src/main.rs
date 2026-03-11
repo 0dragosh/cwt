@@ -15,12 +15,15 @@ mod tmux;
 mod ui;
 mod worktree;
 
+use crate::worktree::Manager;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use crate::worktree::Manager;
 
 #[derive(Parser)]
-#[command(name = "cwt", about = "Claude Worktree Manager — TUI for managing git worktrees with Claude Code")]
+#[command(
+    name = "cwt",
+    about = "Claude Worktree Manager — TUI for managing git worktrees with Claude Code"
+)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -149,7 +152,12 @@ fn main() -> Result<()> {
     match cli.command {
         None | Some(Commands::Tui) => run_tui(manager)?,
         Some(Commands::List) => cmd_list(&manager)?,
-        Some(Commands::Create { name, base, carry, remote }) => {
+        Some(Commands::Create {
+            name,
+            base,
+            carry,
+            remote,
+        }) => {
             if let Some(ref remote_name) = remote {
                 cmd_create_remote(&manager, name.as_deref(), &base, remote_name)?
             } else {
@@ -161,9 +169,12 @@ fn main() -> Result<()> {
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
         Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
         Some(Commands::Dispatch { tasks, base }) => cmd_dispatch(&manager, &tasks, &base)?,
-        Some(Commands::Import { github, linear, limit, base }) => {
-            cmd_import(&manager, github, linear, limit, &base)?
-        }
+        Some(Commands::Import {
+            github,
+            linear,
+            limit,
+            base,
+        }) => cmd_import(&manager, github, linear, limit, &base)?,
         // Already handled above
         Some(Commands::AddRepo { .. }) | Some(Commands::Forest) | Some(Commands::Status) => {
             unreachable!()
@@ -189,8 +200,7 @@ fn run_tui(manager: Manager) -> Result<()> {
     let mut terminal = ratatui::Terminal::new(backend)?;
 
     // Start hook socket listener
-    let hook_listener = hooks::socket::HookSocketListener::start(&manager.repo_root)
-        .ok(); // Non-fatal if socket fails
+    let hook_listener = hooks::socket::HookSocketListener::start(&manager.repo_root).ok(); // Non-fatal if socket fails
 
     // Create app
     let mut app = app::App::new(manager)?;
@@ -317,7 +327,10 @@ fn cmd_list(manager: &Manager) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<20} {:<12} {:<25} {:<10}", "NAME", "LIFECYCLE", "BRANCH", "STATUS");
+    println!(
+        "{:<20} {:<12} {:<25} {:<10}",
+        "NAME", "LIFECYCLE", "BRANCH", "STATUS"
+    );
     println!("{}", "-".repeat(70));
 
     for wt in &worktrees {
@@ -326,7 +339,10 @@ fn cmd_list(manager: &Manager) -> Result<()> {
             worktree::Lifecycle::Permanent => "permanent",
         };
         let status = format!("{:?}", wt.status).to_lowercase();
-        println!("{:<20} {:<12} {:<25} {:<10}", wt.name, lifecycle, wt.branch, status);
+        println!(
+            "{:<20} {:<12} {:<25} {:<10}",
+            wt.name, lifecycle, wt.branch, status
+        );
     }
 
     println!("\n{} worktree(s)", worktrees.len());
@@ -339,7 +355,11 @@ fn cmd_create(manager: &Manager, name: Option<&str>, base: &str, carry: bool) ->
     println!("Created worktree '{}'", wt.name);
     println!("  Path:   {}", abs_path.display());
     println!("  Branch: {}", wt.branch);
-    println!("  Base:   {} ({})", wt.base_branch, &wt.base_commit[..8.min(wt.base_commit.len())]);
+    println!(
+        "  Base:   {} ({})",
+        wt.base_branch,
+        &wt.base_commit[..8.min(wt.base_commit.len())]
+    );
     Ok(())
 }
 
@@ -376,8 +396,7 @@ fn cmd_create_remote(
     // Create worktree on remote
     let branch_name = format!("wt/{}", wt_name);
     println!("Creating worktree '{}' on '{}'...", wt_name, host.name);
-    let remote_path =
-        host.create_worktree(&repo_name, &wt_name, &branch_name, base)?;
+    let remote_path = host.create_worktree(&repo_name, &wt_name, &branch_name, base)?;
 
     // Register in local state
     let wt_rel_path = std::path::PathBuf::from(&manager.config.worktree.dir).join(&wt_name);
@@ -400,7 +419,11 @@ fn cmd_create_remote(
     println!("  Host:   {} ({})", host.name, host.host);
     println!("  Path:   {}", remote_path);
     println!("  Branch: {}", branch_name);
-    println!("  Base:   {} ({})", base, &base_commit[..8.min(base_commit.len())]);
+    println!(
+        "  Base:   {} ({})",
+        base,
+        &base_commit[..8.min(base_commit.len())]
+    );
 
     Ok(())
 }
@@ -463,23 +486,26 @@ fn cmd_hooks(repo_root: &std::path::Path, action: HooksAction) -> Result<()> {
             if sock_path.exists() {
                 println!("  Socket: {} (active)", sock_path.display());
             } else {
-                println!("  Socket: {} (inactive — TUI not running)", sock_path.display());
+                println!(
+                    "  Socket: {} (inactive — TUI not running)",
+                    sock_path.display()
+                );
             }
 
             // Hook scripts
             if hooks_dir.exists() {
                 let scripts: Vec<_> = std::fs::read_dir(&hooks_dir)?
                     .filter_map(|e| e.ok())
-                    .filter(|e| {
-                        e.file_name()
-                            .to_string_lossy()
-                            .starts_with("cwt-")
-                    })
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("cwt-"))
                     .collect();
                 if scripts.is_empty() {
                     println!("  Hooks:  not installed");
                 } else {
-                    println!("  Hooks:  {} script(s) in {}", scripts.len(), hooks_dir.display());
+                    println!(
+                        "  Hooks:  {} script(s) in {}",
+                        scripts.len(),
+                        hooks_dir.display()
+                    );
                     for s in &scripts {
                         println!("          - {}", s.file_name().to_string_lossy());
                     }
@@ -519,7 +545,11 @@ fn cmd_dispatch(manager: &Manager, tasks: &[String], base: &str) -> Result<()> {
         std::process::exit(1);
     }
 
-    println!("Dispatching {} task(s) on branch '{}'...\n", tasks.len(), base);
+    println!(
+        "Dispatching {} task(s) on branch '{}'...\n",
+        tasks.len(),
+        base
+    );
 
     let results = orchestration::dispatch::dispatch_tasks(manager, tasks, base);
 
@@ -565,8 +595,7 @@ fn cmd_import(
     }
 
     let (issues, source) = if github {
-        let issues =
-            orchestration::import::fetch_github_issues(&manager.repo_root, limit)?;
+        let issues = orchestration::import::fetch_github_issues(&manager.repo_root, limit)?;
         (issues, "GitHub")
     } else {
         let issues = orchestration::import::fetch_linear_issues(limit)?;

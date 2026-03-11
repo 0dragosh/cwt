@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 use crate::session;
-use crate::worktree::Manager;
 use crate::worktree::model::WorktreeStatus;
+use crate::worktree::Manager;
 
 /// Per-repo statistics tracked in the global index.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -47,7 +47,10 @@ pub fn load_index() -> Result<GlobalIndex> {
     };
 
     if !path.exists() {
-        return Ok(GlobalIndex { version: 1, repos: HashMap::new() });
+        return Ok(GlobalIndex {
+            version: 1,
+            repos: HashMap::new(),
+        });
     }
 
     let content = std::fs::read_to_string(&path)
@@ -59,16 +62,15 @@ pub fn load_index() -> Result<GlobalIndex> {
 
 /// Save the global index.
 pub fn save_index(index: &GlobalIndex) -> Result<()> {
-    let path = index_path()
-        .context("unable to determine config directory")?;
+    let path = index_path().context("unable to determine config directory")?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    let content = serde_json::to_string_pretty(index)
-        .context("failed to serialize global index")?;
+    let content =
+        serde_json::to_string_pretty(index).context("failed to serialize global index")?;
     std::fs::write(&path, content)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
@@ -143,5 +145,11 @@ pub fn aggregate_stats(index: &GlobalIndex) -> (usize, usize, usize, usize, usiz
         total_done += entry.stats.done_sessions;
     }
 
-    (repo_count, total_worktrees, total_running, total_waiting, total_done)
+    (
+        repo_count,
+        total_worktrees,
+        total_running,
+        total_waiting,
+        total_done,
+    )
 }

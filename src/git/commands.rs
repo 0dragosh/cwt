@@ -93,7 +93,12 @@ fn parse_porcelain(output: &str) -> Result<Vec<GitWorktree>> {
 }
 
 /// Add a new worktree with a new branch.
-pub fn worktree_add(repo_root: &Path, worktree_path: &Path, branch: &str, base: &str) -> Result<()> {
+pub fn worktree_add(
+    repo_root: &Path,
+    worktree_path: &Path,
+    branch: &str,
+    base: &str,
+) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent)
@@ -104,7 +109,10 @@ pub fn worktree_add(repo_root: &Path, worktree_path: &Path, branch: &str, base: 
         .to_str()
         .context("worktree path is not valid UTF-8")?;
 
-    git(repo_root, &["worktree", "add", path_str, "-b", branch, base])?;
+    git(
+        repo_root,
+        &["worktree", "add", path_str, "-b", branch, base],
+    )?;
     Ok(())
 }
 

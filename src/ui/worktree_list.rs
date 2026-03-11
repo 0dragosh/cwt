@@ -38,9 +38,7 @@ pub fn render(
                 WorktreeStatus::Waiting => {
                     Span::styled(theme::ICON_WAITING, theme::status_waiting_style())
                 }
-                WorktreeStatus::Done => {
-                    Span::styled(theme::ICON_DONE, theme::status_done_style())
-                }
+                WorktreeStatus::Done => Span::styled(theme::ICON_DONE, theme::status_done_style()),
                 WorktreeStatus::Shipping => {
                     Span::styled(theme::ICON_SHIPPING, theme::status_shipping_style())
                 }
@@ -101,12 +99,7 @@ pub fn render(
                 Style::default().fg(Color::DarkGray),
             );
 
-            let mut line_spans = vec![
-                Span::raw(" "),
-                status_icon,
-                Span::raw(" "),
-                lifecycle_icon,
-            ];
+            let mut line_spans = vec![Span::raw(" "), status_icon, Span::raw(" "), lifecycle_icon];
             line_spans.extend(name_span);
 
             // Show remote host indicator if this is a remote worktree

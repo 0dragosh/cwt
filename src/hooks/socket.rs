@@ -105,7 +105,10 @@ fn run_listener(path: &Path, tx: mpsc::Sender<HookEvent>) -> Result<()> {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("cwt: failed to parse hook event: {} (line: {})", e, line);
+                                eprintln!(
+                                    "cwt: failed to parse hook event: {} (line: {})",
+                                    e, line
+                                );
                             }
                         },
                         Err(e) => {

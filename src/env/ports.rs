@@ -16,9 +16,10 @@ pub struct PortAllocation {
 impl PortAllocation {
     /// Get the primary port (the "app" port, or the first port).
     pub fn primary_port(&self) -> Option<u16> {
-        self.ports.get("app").copied().or_else(|| {
-            self.ports.values().next().copied()
-        })
+        self.ports
+            .get("app")
+            .copied()
+            .or_else(|| self.ports.values().next().copied())
     }
 
     /// Generate environment variables for this allocation.
@@ -92,11 +93,7 @@ impl PortManager {
 
     /// Allocate ports for a new worktree.
     /// `port_names` is a list of logical port names (e.g., ["app", "db"]).
-    pub fn allocate(
-        &mut self,
-        worktree_name: &str,
-        port_names: &[&str],
-    ) -> Result<PortAllocation> {
+    pub fn allocate(&mut self, worktree_name: &str, port_names: &[&str]) -> Result<PortAllocation> {
         if self.allocations.contains_key(worktree_name) {
             return Ok(self.allocations[worktree_name].clone());
         }
@@ -157,10 +154,7 @@ impl PortManager {
 
         for (wt_name, alloc) in sorted {
             for (port_name, port) in &alloc.ports {
-                lines.push(format!(
-                    "localhost:{} -> {} ({})",
-                    port, wt_name, port_name
-                ));
+                lines.push(format!("localhost:{} -> {} ({})", port, wt_name, port_name));
             }
         }
 
@@ -187,10 +181,7 @@ fn find_available_port(base: u16, used: &[u16]) -> Result<u16> {
         port = port.wrapping_add(1);
     }
 
-    anyhow::bail!(
-        "could not find an available port starting from {}",
-        base
-    )
+    anyhow::bail!("could not find an available port starting from {}", base)
 }
 
 /// Check if a TCP port is free by attempting to bind to it.

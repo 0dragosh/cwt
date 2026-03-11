@@ -41,7 +41,7 @@ pub fn render(f: &mut Frame, dialog: &GcDialog) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // header
-            Constraint::Min(5),   // list
+            Constraint::Min(5),    // list
             Constraint::Length(2), // buttons
         ])
         .margin(1)

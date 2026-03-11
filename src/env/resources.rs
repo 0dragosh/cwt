@@ -74,10 +74,7 @@ const MEMORY_CRITICAL_PERCENT: f64 = 95.0;
 
 /// Calculate disk usage for a directory using `du`.
 pub fn disk_usage(path: &Path) -> u64 {
-    let output = Command::new("du")
-        .args(["-sb", "--"])
-        .arg(path)
-        .output();
+    let output = Command::new("du").args(["-sb", "--"]).arg(path).output();
 
     match output {
         Ok(o) if o.status.success() => {
@@ -102,8 +99,7 @@ pub fn get_resource_usage(
 
     let (container_cpu_percent, container_memory_bytes, container_memory_limit) =
         if let Some(cid) = container_id {
-            container::container_stats(runtime, cid)
-                .unwrap_or((0.0, 0, 0))
+            container::container_stats(runtime, cid).unwrap_or((0.0, 0, 0))
         } else {
             (0.0, 0, 0)
         };
@@ -117,9 +113,7 @@ pub fn get_resource_usage(
 }
 
 /// Check for resource warnings across all worktrees.
-pub fn check_warnings(
-    worktrees: &[(String, ResourceUsage)],
-) -> Vec<ResourceWarning> {
+pub fn check_warnings(worktrees: &[(String, ResourceUsage)]) -> Vec<ResourceWarning> {
     let mut warnings = Vec::new();
 
     for (name, usage) in worktrees {
@@ -127,19 +121,13 @@ pub fn check_warnings(
         if usage.disk_bytes >= DISK_CRITICAL_BYTES {
             warnings.push(ResourceWarning {
                 worktree_name: name.clone(),
-                message: format!(
-                    "Disk usage critical: {} (>5 GiB)",
-                    usage.format_disk()
-                ),
+                message: format!("Disk usage critical: {} (>5 GiB)", usage.format_disk()),
                 severity: WarningSeverity::Critical,
             });
         } else if usage.disk_bytes >= DISK_WARNING_BYTES {
             warnings.push(ResourceWarning {
                 worktree_name: name.clone(),
-                message: format!(
-                    "Disk usage high: {} (>1 GiB)",
-                    usage.format_disk()
-                ),
+                message: format!("Disk usage high: {} (>1 GiB)", usage.format_disk()),
                 severity: WarningSeverity::Warning,
             });
         }

@@ -66,7 +66,7 @@ pub fn render(f: &mut Frame, dialog: &ShipDialog) {
             Constraint::Length(1), // separator
             Constraint::Length(3), // mode selector
             Constraint::Length(1), // separator
-            Constraint::Min(3),   // diff preview
+            Constraint::Min(3),    // diff preview
             Constraint::Length(2), // buttons
         ])
         .margin(1)
@@ -86,10 +86,8 @@ pub fn render(f: &mut Frame, dialog: &ShipDialog) {
     f.render_widget(Paragraph::new(branch_lines), chunks[0]);
 
     // Separator
-    let sep = Paragraph::new(
-        "\u{2500}".repeat(chunks[1].width as usize),
-    )
-    .style(Style::default().fg(Color::DarkGray));
+    let sep = Paragraph::new("\u{2500}".repeat(chunks[1].width as usize))
+        .style(Style::default().fg(Color::DarkGray));
     f.render_widget(sep, chunks[1]);
 
     // Mode selector
@@ -125,10 +123,8 @@ pub fn render(f: &mut Frame, dialog: &ShipDialog) {
     f.render_widget(Paragraph::new(mode_lines), chunks[2]);
 
     // Separator
-    let sep2 = Paragraph::new(
-        "\u{2500}".repeat(chunks[3].width as usize),
-    )
-    .style(Style::default().fg(Color::DarkGray));
+    let sep2 = Paragraph::new("\u{2500}".repeat(chunks[3].width as usize))
+        .style(Style::default().fg(Color::DarkGray));
     f.render_widget(sep2, chunks[3]);
 
     // Diff preview
@@ -138,7 +134,11 @@ pub fn render(f: &mut Frame, dialog: &ShipDialog) {
         format!("{} file(s) changed:", dialog.files_changed),
         theme::help_key_style(),
     )));
-    for line in dialog.diff_preview.lines().take(diff_area.height as usize - 1) {
+    for line in dialog
+        .diff_preview
+        .lines()
+        .take(diff_area.height as usize - 1)
+    {
         let style = if line.starts_with('+') {
             theme::diff_add_style()
         } else if line.starts_with('-') {
@@ -181,10 +181,7 @@ pub fn pr_ci_spans(pr_status: &PrStatus, ci_status: &CiStatus) -> Vec<Span<'stat
             ));
         }
         PrStatus::Open => {
-            spans.push(Span::styled(
-                " PR:open",
-                Style::default().fg(Color::Blue),
-            ));
+            spans.push(Span::styled(" PR:open", Style::default().fg(Color::Blue)));
         }
         PrStatus::Approved => {
             spans.push(Span::styled(
@@ -201,33 +198,22 @@ pub fn pr_ci_spans(pr_status: &PrStatus, ci_status: &CiStatus) -> Vec<Span<'stat
             ));
         }
         PrStatus::Closed => {
-            spans.push(Span::styled(
-                " PR:closed",
-                Style::default().fg(Color::Red),
-            ));
+            spans.push(Span::styled(" PR:closed", Style::default().fg(Color::Red)));
         }
     }
 
     match ci_status {
         CiStatus::None => {}
         CiStatus::Pending => {
-            spans.push(Span::styled(
-                " CI:...",
-                Style::default().fg(Color::Yellow),
-            ));
+            spans.push(Span::styled(" CI:...", Style::default().fg(Color::Yellow)));
         }
         CiStatus::Passed => {
-            spans.push(Span::styled(
-                " CI:ok",
-                Style::default().fg(Color::Green),
-            ));
+            spans.push(Span::styled(" CI:ok", Style::default().fg(Color::Green)));
         }
         CiStatus::Failed => {
             spans.push(Span::styled(
                 " CI:fail",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         }
     }

@@ -38,10 +38,7 @@ pub fn render(f: &mut Frame, dialog: &BroadcastDialog) {
     let area = centered_rect(60, height, f.area());
     f.render_widget(Clear, area);
 
-    let title = format!(
-        " Broadcast to {} session(s) ",
-        dialog.target_count
-    );
+    let title = format!(" Broadcast to {} session(s) ", dialog.target_count);
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -54,11 +51,11 @@ pub fn render(f: &mut Frame, dialog: &BroadcastDialog) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),                   // instructions
+            Constraint::Length(1),                     // instructions
             Constraint::Length(target_display_height), // targets
-            Constraint::Length(2),                   // input
-            Constraint::Length(1),                   // spacer
-            Constraint::Length(1),                   // buttons
+            Constraint::Length(2),                     // input
+            Constraint::Length(1),                     // spacer
+            Constraint::Length(1),                     // buttons
         ])
         .margin(1)
         .split(inner);

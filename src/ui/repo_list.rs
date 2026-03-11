@@ -44,20 +44,11 @@ pub fn render(
             };
 
             let activity_icon = if running > 0 {
-                Span::styled(
-                    theme::ICON_RUNNING,
-                    theme::status_running_style(),
-                )
+                Span::styled(theme::ICON_RUNNING, theme::status_running_style())
             } else if waiting > 0 {
-                Span::styled(
-                    theme::ICON_WAITING,
-                    theme::status_waiting_style(),
-                )
+                Span::styled(theme::ICON_WAITING, theme::status_waiting_style())
             } else {
-                Span::styled(
-                    theme::ICON_IDLE,
-                    theme::status_idle_style(),
-                )
+                Span::styled(theme::ICON_IDLE, theme::status_idle_style())
             };
 
             let name_span = Span::styled(
@@ -71,15 +62,9 @@ pub fn render(
             );
 
             let status_span = if running > 0 {
-                Span::styled(
-                    status_summary,
-                    Style::default().fg(Color::Green),
-                )
+                Span::styled(status_summary, Style::default().fg(Color::Green))
             } else if waiting > 0 {
-                Span::styled(
-                    status_summary,
-                    Style::default().fg(Color::Yellow),
-                )
+                Span::styled(status_summary, Style::default().fg(Color::Yellow))
             } else {
                 Span::raw(status_summary)
             };

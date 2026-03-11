@@ -240,11 +240,21 @@ mod tests {
 
         // Create a new window (tab) — mirrors what create_pane does
         let result = tmux_cmd(&[
-            "new-window", "-d", "-P", "-F", "#{pane_id}", "-n", "cwt:test-wt", "sleep 60",
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-n",
+            "cwt:test-wt",
+            "sleep 60",
         ]);
         assert!(result.is_ok(), "new-window should succeed");
         let pane_id = result.unwrap().trim().to_string();
-        assert!(pane_id.starts_with('%'), "pane_id should start with %: {pane_id}");
+        assert!(
+            pane_id.starts_with('%'),
+            "pane_id should start with %: {pane_id}"
+        );
 
         // Verify the window was created with the right name
         let windows = tmux_cmd(&["list-windows", "-t", "test", "-F", "#{window_name}"]);

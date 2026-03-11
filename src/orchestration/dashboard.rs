@@ -84,8 +84,7 @@ fn read_session_usage(worktree_abs_path: &Path) -> (TranscriptUsage, String) {
 
     match project_dir {
         Some(dir) => {
-            let info = session::transcript::read_transcript_info(&dir, 1)
-                .unwrap_or_default();
+            let info = session::transcript::read_transcript_info(&dir, 1).unwrap_or_default();
             (info.usage, info.last_message)
         }
         None => (TranscriptUsage::default(), String::new()),

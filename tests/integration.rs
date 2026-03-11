@@ -135,15 +135,12 @@ fn cwt_binary() -> PathBuf {
     }
 
     // Fall back to cargo build target
-    let target_debug = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/cwt");
+    let target_debug = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/cwt");
     if target_debug.exists() {
         return target_debug;
     }
 
-    panic!(
-        "cwt binary not found. Run `cargo build` or `nix build` first."
-    );
+    panic!("cwt binary not found. Run `cargo build` or `nix build` first.");
 }
 
 /// Read and parse .cwt/state.json from a repo.
@@ -178,7 +175,10 @@ fn test_create_worktree_with_name() {
         .output()
         .unwrap();
     let wt_list = String::from_utf8_lossy(&out.stdout);
-    assert!(wt_list.contains("my-feature"), "git should list the worktree");
+    assert!(
+        wt_list.contains("my-feature"),
+        "git should list the worktree"
+    );
 }
 
 #[test]
@@ -415,7 +415,11 @@ fn test_handoff_worktree_to_local() {
     let wt_path = root.join(".claude/worktrees/handoff-wt");
 
     // Modify an existing tracked file so `git diff HEAD` picks it up
-    std::fs::write(wt_path.join("README.md"), "# test repo\nmodified in worktree\n").unwrap();
+    std::fs::write(
+        wt_path.join("README.md"),
+        "# test repo\nmodified in worktree\n",
+    )
+    .unwrap();
 
     // Generate patch from worktree (tracked changes only)
     let patch_out = Command::new("git")
@@ -499,7 +503,10 @@ fn test_handoff_local_to_worktree() {
                 .unwrap();
         }
         let result = child.wait_with_output().unwrap();
-        assert!(result.status.success(), "git apply should succeed in worktree");
+        assert!(
+            result.status.success(),
+            "git apply should succeed in worktree"
+        );
 
         // Verify worktree has the file
         assert!(wt_path.join("local-change.txt").exists());
@@ -533,7 +540,10 @@ fn test_hooks_install_creates_scripts() {
         let perms = std::fs::metadata(hooks_dir.join("cwt-stop.sh"))
             .unwrap()
             .permissions();
-        assert!(perms.mode() & 0o111 != 0, "hook script should be executable");
+        assert!(
+            perms.mode() & 0o111 != 0,
+            "hook script should be executable"
+        );
     }
 }
 
@@ -771,9 +781,7 @@ fn test_branch_naming_convention() {
 
     // Branch should be wt/<name>
     let state = read_state(&root);
-    let branch = state["worktrees"]["feat-auth"]["branch"]
-        .as_str()
-        .unwrap();
+    let branch = state["worktrees"]["feat-auth"]["branch"].as_str().unwrap();
     assert_eq!(branch, "wt/feat-auth");
 
     // Verify git has the branch
@@ -823,7 +831,10 @@ fn test_state_reconciliation_after_manual_removal() {
 
     // Manually remove it via git (bypassing cwt)
     let wt_path = root.join(".claude/worktrees/recon-wt");
-    run_git(&root, &["worktree", "remove", "--force", wt_path.to_str().unwrap()]);
+    run_git(
+        &root,
+        &["worktree", "remove", "--force", wt_path.to_str().unwrap()],
+    );
 
     // cwt list should reconcile and not show the removed worktree
     let (stdout, _stderr, ok) = run_cwt(&root, &["list"]);

@@ -81,10 +81,8 @@ impl App {
         }
 
         // Rebuild port manager from existing worktree port allocations
-        let existing_ports: Vec<env::ports::PortAllocation> = worktrees
-            .iter()
-            .filter_map(|wt| wt.ports.clone())
-            .collect();
+        let existing_ports: Vec<env::ports::PortAllocation> =
+            worktrees.iter().filter_map(|wt| wt.ports.clone()).collect();
         let port_manager = if existing_ports.is_empty() {
             env::ports::PortManager::new(
                 manager.config.container.app_base_port,
@@ -155,9 +153,7 @@ impl App {
                     if wt.last_session_id.is_none() {
                         let wt_abs = self.manager.worktree_abs_path(wt);
                         if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
-                            if let Ok(Some(sid)) =
-                                session::tracker::find_latest_session_id(&dir)
-                            {
+                            if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
                                 wt.last_session_id = Some(sid);
                             }
                         }
@@ -203,10 +199,9 @@ impl App {
     /// Update aggregate dashboard stats across all sessions.
     pub fn update_dashboard(&mut self) {
         let manager = &self.manager;
-        self.dashboard = orchestration::dashboard::compute_aggregate_stats(
-            &self.worktrees,
-            |wt| manager.worktree_abs_path(wt),
-        );
+        self.dashboard = orchestration::dashboard::compute_aggregate_stats(&self.worktrees, |wt| {
+            manager.worktree_abs_path(wt)
+        });
     }
 
     /// Handle a hook event received from the Unix socket.
@@ -218,8 +213,7 @@ impl App {
                 self.update_inspector();
             }
             HookEvent::WorktreeRemoved { worktree, .. } => {
-                self.status_message =
-                    format!("Worktree '{}' removed externally", worktree);
+                self.status_message = format!("Worktree '{}' removed externally", worktree);
                 self.refresh();
                 self.clamp_selection();
                 self.update_inspector();
@@ -230,18 +224,13 @@ impl App {
                 ..
             } => {
                 // Update the worktree status to Done
-                if let Some(wt) = self
-                    .worktrees
-                    .iter_mut()
-                    .find(|wt| wt.name == worktree)
-                {
+                if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == worktree) {
                     wt.status = WorktreeStatus::Done;
                     if let Some(sid) = session_id {
                         wt.last_session_id = Some(sid);
                     }
                 }
-                self.status_message =
-                    format!("Session stopped for '{}'", worktree);
+                self.status_message = format!("Session stopped for '{}'", worktree);
                 self.update_badge_counts();
                 self.update_inspector();
 
@@ -252,11 +241,7 @@ impl App {
                 worktree, message, ..
             } => {
                 // Update the worktree status to Waiting
-                if let Some(wt) = self
-                    .worktrees
-                    .iter_mut()
-                    .find(|wt| wt.name == worktree)
-                {
+                if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == worktree) {
                     wt.status = WorktreeStatus::Waiting;
                 }
                 let msg = message.unwrap_or_default();
@@ -272,8 +257,7 @@ impl App {
                 self.persist_status_change(&worktree, WorktreeStatus::Waiting);
             }
             HookEvent::SubagentStopped { worktree, .. } => {
-                self.status_message =
-                    format!("Subagent stopped in '{}'", worktree);
+                self.status_message = format!("Subagent stopped in '{}'", worktree);
                 // Refresh to pick up any state changes
                 self.refresh();
                 self.update_inspector();
@@ -294,7 +278,9 @@ impl App {
     /// Get the currently selected worktree.
     pub fn selected_worktree(&self) -> Option<&Worktree> {
         let filtered = self.filtered_worktrees();
-        self.list_state.selected().and_then(|i| filtered.get(i).copied())
+        self.list_state
+            .selected()
+            .and_then(|i| filtered.get(i).copied())
     }
 
     /// Get filtered worktree list.
@@ -323,9 +309,7 @@ impl App {
                     .map(|s| s.raw)
                     .unwrap_or_default();
 
-                let project_dir = session::tracker::find_project_dir(&wt_abs)
-                    .ok()
-                    .flatten();
+                let project_dir = session::tracker::find_project_dir(&wt_abs).ok().flatten();
 
                 let transcript_info = project_dir
                     .as_ref()
@@ -395,16 +379,15 @@ impl App {
         self.last_list_area = Some(list_area);
 
         // Render the top bar with notification badges and aggregate stats
-        let total_tokens = if self.dashboard.total_input_tokens > 0
-            || self.dashboard.total_output_tokens > 0
-        {
-            Some((
-                self.dashboard.total_input_tokens,
-                self.dashboard.total_output_tokens,
-            ))
-        } else {
-            None
-        };
+        let total_tokens =
+            if self.dashboard.total_input_tokens > 0 || self.dashboard.total_output_tokens > 0 {
+                Some((
+                    self.dashboard.total_input_tokens,
+                    self.dashboard.total_output_tokens,
+                ))
+            } else {
+                None
+            };
         ui::layout::render_top_bar_with_stats(
             frame,
             top_bar_area,
@@ -740,8 +723,11 @@ impl App {
                 self.create_remote_worktree(name, &dialog_clone.base_branch, remote_name);
             } else {
                 // Local worktree creation
-                match self.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
-                {
+                match self.manager.create(
+                    name,
+                    &dialog_clone.base_branch,
+                    dialog_clone.carry_changes,
+                ) {
                     Ok(wt) => {
                         let wt_name = wt.name.clone();
                         self.setup_worktree_env(&wt_name);
@@ -785,10 +771,8 @@ impl App {
 
             match self.manager.delete(&dialog_clone.worktree_name) {
                 Ok(()) => {
-                    self.status_message = format!(
-                        "Deleted '{}' (snapshot saved)",
-                        dialog_clone.worktree_name
-                    );
+                    self.status_message =
+                        format!("Deleted '{}' (snapshot saved)", dialog_clone.worktree_name);
                     self.refresh();
                     self.clamp_selection();
                     self.update_inspector();
@@ -975,20 +959,20 @@ impl App {
             base_commit.as_deref(),
         );
 
-        let (stat_raw, files_changed, has_commits, commit_count, gitignore_warnings) =
-            match preview {
-                Ok(p) => (
-                    p.diff_stat.raw,
-                    p.diff_stat.files_changed,
-                    p.has_commits,
-                    p.commit_count,
-                    p.gitignore_warnings,
-                ),
-                Err(_) => {
-                    let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
-                    (stat.raw, stat.files_changed, false, 0, Vec::new())
-                }
-            };
+        let (stat_raw, files_changed, has_commits, commit_count, gitignore_warnings) = match preview
+        {
+            Ok(p) => (
+                p.diff_stat.raw,
+                p.diff_stat.files_changed,
+                p.has_commits,
+                p.commit_count,
+                p.gitignore_warnings,
+            ),
+            Err(_) => {
+                let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
+                (stat.raw, stat.files_changed, false, 0, Vec::new())
+            }
+        };
 
         let dialog = ui::dialogs::handoff::HandoffDialog::new(
             wt.name.clone(),
@@ -1046,18 +1030,15 @@ impl App {
                 .ok()
                 .flatten()
                 .and_then(|dir| {
-                    session::tracker::find_latest_session_id(&dir).ok().flatten()
+                    session::tracker::find_latest_session_id(&dir)
+                        .ok()
+                        .flatten()
                 })
         });
 
         let launch_result = if let Some(ref sid) = session_id {
             // Try to resume a previous session
-            session::launcher::resume_session(
-                &wt,
-                &wt_abs,
-                sid,
-                &self.manager.config.session,
-            )
+            session::launcher::resume_session(&wt, &wt_abs, sid, &self.manager.config.session)
         } else {
             // Fresh launch
             session::launcher::launch_session(&wt, &wt_abs, &self.manager.config.session)
@@ -1065,7 +1046,11 @@ impl App {
 
         match launch_result {
             Ok(pane_id) => {
-                let action = if session_id.is_some() { "Resumed" } else { "Launched" };
+                let action = if session_id.is_some() {
+                    "Resumed"
+                } else {
+                    "Launched"
+                };
 
                 // Update state with pane ID and session ID
                 if let Ok(mut state) = self.manager.load_state() {
@@ -1079,8 +1064,7 @@ impl App {
                     let _ = self.manager.save_state(&state);
                 }
 
-                self.status_message =
-                    format!("{} session for '{}' ({})", action, wt.name, pane_id);
+                self.status_message = format!("{} session for '{}' ({})", action, wt.name, pane_id);
                 self.refresh();
                 self.update_inspector();
             }
@@ -1152,8 +1136,7 @@ impl App {
             if let Some(snap) = dialog_clone.selected_snapshot() {
                 match self.manager.restore_snapshot(snap) {
                     Ok(wt) => {
-                        self.status_message =
-                            format!("Restored '{}' from snapshot", wt.name);
+                        self.status_message = format!("Restored '{}' from snapshot", wt.name);
                         self.refresh();
                         self.update_inspector();
                     }
@@ -1263,8 +1246,7 @@ impl App {
             if tasks.is_empty() {
                 self.status_message = "No tasks to dispatch".to_string();
             } else {
-                let results =
-                    orchestration::dispatch::dispatch_tasks(&self.manager, &tasks, &base);
+                let results = orchestration::dispatch::dispatch_tasks(&self.manager, &tasks, &base);
                 let success_count = results.iter().filter(|r| r.error.is_none()).count();
                 let fail_count = results.iter().filter(|r| r.error.is_some()).count();
 
@@ -1317,19 +1299,15 @@ impl App {
         let dialog_clone = dialog.clone();
         if dialog_clone.confirmed {
             let prompt = dialog_clone.prompt_input.trim().to_string();
-            let results =
-                orchestration::broadcast::broadcast_prompt(&self.worktrees, &prompt);
+            let results = orchestration::broadcast::broadcast_prompt(&self.worktrees, &prompt);
             let success_count = results.iter().filter(|r| r.success).count();
             let fail_count = results.iter().filter(|r| !r.success).count();
 
             if fail_count == 0 {
-                self.status_message =
-                    format!("Broadcast sent to {} session(s)", success_count);
+                self.status_message = format!("Broadcast sent to {} session(s)", success_count);
             } else {
-                self.status_message = format!(
-                    "Broadcast: {} sent, {} failed",
-                    success_count, fail_count
-                );
+                self.status_message =
+                    format!("Broadcast: {} sent, {} failed", success_count, fail_count);
             }
             self.dialog = ActiveDialog::None;
         } else if dialog_clone.cancelled {
@@ -1497,10 +1475,8 @@ impl App {
                     let _ = self.manager.save_state(&state);
                 }
 
-                self.status_message = format!(
-                    "PR #{} created: {}",
-                    result.pr_number, result.pr_url
-                );
+                self.status_message =
+                    format!("PR #{} created: {}", result.pr_number, result.pr_url);
                 self.refresh();
                 self.update_inspector();
             }
@@ -1525,10 +1501,8 @@ impl App {
                     let _ = self.manager.save_state(&state);
                 }
 
-                self.status_message = format!(
-                    "Shipped! PR #{}: {}",
-                    result.pr_number, result.pr_url
-                );
+                self.status_message =
+                    format!("Shipped! PR #{}: {}", result.pr_number, result.pr_url);
                 self.refresh();
                 self.update_inspector();
             }
@@ -1603,8 +1577,7 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    self.status_message =
-                        format!("Port allocation warning: {}", e);
+                    self.status_message = format!("Port allocation warning: {}", e);
                 }
             }
         }
@@ -1691,12 +1664,7 @@ impl App {
     }
 
     /// Create a worktree on a remote host.
-    fn create_remote_worktree(
-        &mut self,
-        name: Option<&str>,
-        base_branch: &str,
-        remote_name: &str,
-    ) {
+    fn create_remote_worktree(&mut self, name: Option<&str>, base_branch: &str, remote_name: &str) {
         let host = match self
             .manager
             .config
@@ -1707,8 +1675,7 @@ impl App {
         {
             Some(h) => h,
             None => {
-                self.status_message =
-                    format!("Remote host '{}' not found in config", remote_name);
+                self.status_message = format!("Remote host '{}' not found in config", remote_name);
                 return;
             }
         };
@@ -1745,18 +1712,14 @@ impl App {
 
         // Create worktree on remote
         let branch_name = format!("wt/{}", wt_name);
-        let remote_path = match host.create_worktree(
-            &repo_name,
-            &wt_name,
-            &branch_name,
-            base_branch,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                self.status_message = format!("Error creating remote worktree: {}", e);
-                return;
-            }
-        };
+        let remote_path =
+            match host.create_worktree(&repo_name, &wt_name, &branch_name, base_branch) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.status_message = format!("Error creating remote worktree: {}", e);
+                    return;
+                }
+            };
 
         // Register in local state
         let wt_rel_path =
@@ -1777,10 +1740,7 @@ impl App {
             let _ = self.manager.save_state(&state);
         }
 
-        self.status_message = format!(
-            "Created remote worktree '{}' on '{}'",
-            wt_name, host.name
-        );
+        self.status_message = format!("Created remote worktree '{}' on '{}'", wt_name, host.name);
         self.refresh();
         self.update_inspector();
     }
@@ -1810,8 +1770,7 @@ impl App {
         {
             Some(h) => h,
             None => {
-                self.status_message =
-                    format!("Remote host '{}' not found in config", remote_name);
+                self.status_message = format!("Remote host '{}' not found in config", remote_name);
                 return Ok(());
             }
         };
@@ -1821,8 +1780,7 @@ impl App {
             if crate::tmux::pane::pane_exists(pane_id) {
                 match crate::session::launcher::focus_session(pane_id) {
                     Ok(()) => {
-                        self.status_message =
-                            format!("Focused remote session for '{}'", wt.name);
+                        self.status_message = format!("Focused remote session for '{}'", wt.name);
                         return Ok(());
                     }
                     Err(_) => {
@@ -1835,8 +1793,7 @@ impl App {
         let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
 
         // Check if remote session exists, if not launch it
-        let remote_status =
-            remote::session::check_remote_session_status(&host, &wt.name);
+        let remote_status = remote::session::check_remote_session_status(&host, &wt.name);
 
         if remote_status == remote::session::RemoteSessionStatus::NoSession {
             // Launch a new remote session
@@ -1847,8 +1804,10 @@ impl App {
                 &self.manager.config.session.claude_args,
             ) {
                 Ok(_tmux_session) => {
-                    self.status_message =
-                        format!("Launched remote session for '{}' on '{}'", wt.name, host.name);
+                    self.status_message = format!(
+                        "Launched remote session for '{}' on '{}'",
+                        wt.name, host.name
+                    );
                 }
                 Err(e) => {
                     self.status_message = format!("Remote session error: {}", e);
@@ -1930,18 +1889,14 @@ impl App {
             };
 
             // Check if host is reachable first
-            let host_status = self
-                .remote_statuses
-                .iter()
-                .find(|s| s.name == *host_name);
+            let host_status = self.remote_statuses.iter().find(|s| s.name == *host_name);
             if let Some(s) = host_status {
                 if s.network == remote::host::NetworkStatus::Disconnected {
                     continue; // Skip unreachable hosts
                 }
             }
 
-            let session_status =
-                remote::session::check_remote_session_status(host, wt_name);
+            let session_status = remote::session::check_remote_session_status(host, wt_name);
 
             let new_status = match session_status {
                 remote::session::RemoteSessionStatus::Running => WorktreeStatus::Running,
@@ -1999,8 +1954,7 @@ impl App {
                     let _ = remote::session::kill_remote_session(&host, worktree_name);
 
                     // Remove remote worktree
-                    let repo_name =
-                        remote::sync::repo_name_from_path(&self.manager.repo_root);
+                    let repo_name = remote::sync::repo_name_from_path(&self.manager.repo_root);
                     if let Err(e) = host.remove_worktree(&repo_name, worktree_name) {
                         self.status_message = format!(
                             "Remote worktree cleanup warning for '{}': {}",
@@ -2016,10 +1970,8 @@ impl App {
             if let Some(ref container) = wt.container {
                 if let Err(e) = env::container::teardown_container(container) {
                     // Non-fatal: log warning but continue with deletion
-                    self.status_message = format!(
-                        "Container teardown warning for '{}': {}",
-                        worktree_name, e
-                    );
+                    self.status_message =
+                        format!("Container teardown warning for '{}': {}", worktree_name, e);
                 }
             }
         }
@@ -2073,10 +2025,8 @@ impl App {
         // Show the most critical warning in the status bar
         if let Some(warning) = self.resource_warnings.first() {
             if warning.severity == env::resources::WarningSeverity::Critical {
-                self.status_message = format!(
-                    "WARNING: {} -- {}",
-                    warning.worktree_name, warning.message
-                );
+                self.status_message =
+                    format!("WARNING: {} -- {}", warning.worktree_name, warning.message);
             }
         }
     }
@@ -2137,8 +2087,12 @@ impl App {
             return;
         }
 
-        let mut updates: Vec<(String, ship::pr::PrStatus, ship::pr::CiStatus, Option<String>)> =
-            Vec::new();
+        let mut updates: Vec<(
+            String,
+            ship::pr::PrStatus,
+            ship::pr::CiStatus,
+            Option<String>,
+        )> = Vec::new();
         let mut merged_worktrees: Vec<String> = Vec::new();
 
         for wt in &self.worktrees {
@@ -2150,8 +2104,7 @@ impl App {
                 ship::pipeline::poll_status(&self.manager.repo_root, wt);
 
             // Check if PR was just merged
-            if pr_status == ship::pr::PrStatus::Merged
-                && wt.pr_status != ship::pr::PrStatus::Merged
+            if pr_status == ship::pr::PrStatus::Merged && wt.pr_status != ship::pr::PrStatus::Merged
             {
                 merged_worktrees.push(wt.name.clone());
             }
@@ -2188,8 +2141,7 @@ impl App {
 
         // Auto-cleanup merged worktrees
         for name in merged_worktrees {
-            self.status_message =
-                format!("PR merged for '{}' -- auto-cleaning up", name);
+            self.status_message = format!("PR merged for '{}' -- auto-cleaning up", name);
             self.teardown_worktree_env(&name);
             match self.manager.delete(&name) {
                 Ok(()) => {
@@ -2257,7 +2209,10 @@ impl ForestApp {
 
         for entry in &forest_config.repo {
             if !entry.path.exists() {
-                eprintln!("warning: repo path {} does not exist, skipping", entry.path.display());
+                eprintln!(
+                    "warning: repo path {} does not exist, skipping",
+                    entry.path.display()
+                );
                 continue;
             }
 
@@ -2384,9 +2339,7 @@ impl ForestApp {
                     {
                         let wt_abs = repo.manager.worktree_abs_path(wt);
                         if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
-                            if let Ok(Some(sid)) =
-                                session::tracker::find_latest_session_id(&dir)
-                            {
+                            if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
                                 wt.last_session_id = Some(sid);
                             }
                         }
@@ -2426,9 +2379,7 @@ impl ForestApp {
                 .map(|s| s.raw)
                 .unwrap_or_default();
 
-            let project_dir = session::tracker::find_project_dir(&wt_abs)
-                .ok()
-                .flatten();
+            let project_dir = session::tracker::find_project_dir(&wt_abs).ok().flatten();
 
             let transcript_info = project_dir
                 .as_ref()
@@ -2543,9 +2494,14 @@ impl ForestApp {
                     repo.worktrees.iter().collect()
                 } else {
                     let fl = self.filter.to_lowercase();
-                    repo.worktrees.iter().filter(|wt| wt.name.to_lowercase().contains(&fl)).collect()
+                    repo.worktrees
+                        .iter()
+                        .filter(|wt| wt.name.to_lowercase().contains(&fl))
+                        .collect()
                 };
-                self.worktree_list_state.selected().and_then(|wi| filtered.get(wi).copied())
+                self.worktree_list_state
+                    .selected()
+                    .and_then(|wi| filtered.get(wi).copied())
             });
 
         ui::inspector::render(
@@ -2562,12 +2518,7 @@ impl ForestApp {
             .and_then(|idx| self.repos.get(idx))
             .map(|r| r.worktrees.len())
             .unwrap_or(0);
-        ui::status_bar::render(
-            frame,
-            status_area,
-            &self.status_message,
-            repo_wt_count,
-        );
+        ui::status_bar::render(frame, status_area, &self.status_message, repo_wt_count);
 
         // Render active dialog on top
         match &self.dialog {
@@ -2719,24 +2670,20 @@ impl ForestApp {
             KeyCode::Char('R') => {
                 self.focus = ForestFocusPanel::RepoList;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                match self.focus {
-                    ForestFocusPanel::RepoList => self.move_repo_selection(1),
-                    ForestFocusPanel::WorktreeList => self.move_wt_selection(1),
-                    ForestFocusPanel::Inspector => {
-                        self.inspector_scroll = self.inspector_scroll.saturating_add(1);
-                    }
+            KeyCode::Char('j') | KeyCode::Down => match self.focus {
+                ForestFocusPanel::RepoList => self.move_repo_selection(1),
+                ForestFocusPanel::WorktreeList => self.move_wt_selection(1),
+                ForestFocusPanel::Inspector => {
+                    self.inspector_scroll = self.inspector_scroll.saturating_add(1);
                 }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                match self.focus {
-                    ForestFocusPanel::RepoList => self.move_repo_selection(-1),
-                    ForestFocusPanel::WorktreeList => self.move_wt_selection(-1),
-                    ForestFocusPanel::Inspector => {
-                        self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
-                    }
+            },
+            KeyCode::Char('k') | KeyCode::Up => match self.focus {
+                ForestFocusPanel::RepoList => self.move_repo_selection(-1),
+                ForestFocusPanel::WorktreeList => self.move_wt_selection(-1),
+                ForestFocusPanel::Inspector => {
+                    self.inspector_scroll = self.inspector_scroll.saturating_sub(1);
                 }
-            }
+            },
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     ForestFocusPanel::RepoList => ForestFocusPanel::WorktreeList,
@@ -2902,8 +2849,11 @@ impl ForestApp {
 
             if let Some(repo) = self.selected_repo() {
                 // Note: remote creation not yet supported in forest mode — use local
-                match repo.manager.create(name, &dialog_clone.base_branch, dialog_clone.carry_changes)
-                {
+                match repo.manager.create(
+                    name,
+                    &dialog_clone.base_branch,
+                    dialog_clone.carry_changes,
+                ) {
                     Ok(wt) => {
                         self.status_message = format!("Created worktree '{}'", wt.name);
                         self.refresh();
@@ -2945,10 +2895,8 @@ impl ForestApp {
             if let Some(repo) = self.selected_repo() {
                 match repo.manager.delete(&dialog_clone.worktree_name) {
                     Ok(()) => {
-                        self.status_message = format!(
-                            "Deleted '{}' (snapshot saved)",
-                            dialog_clone.worktree_name
-                        );
+                        self.status_message =
+                            format!("Deleted '{}' (snapshot saved)", dialog_clone.worktree_name);
                         self.refresh();
                         self.clamp_wt_selection();
                         self.update_inspector();
@@ -3038,7 +2986,9 @@ impl ForestApp {
             let mut total_deleted = 0;
             for repo in &self.repos {
                 // Filter prune names that belong to this repo
-                let repo_prune: Vec<String> = dialog_clone.to_prune.iter()
+                let repo_prune: Vec<String> = dialog_clone
+                    .to_prune
+                    .iter()
                     .filter(|name| repo.worktrees.iter().any(|wt| &wt.name == *name))
                     .cloned()
                     .collect();
@@ -3093,8 +3043,7 @@ impl ForestApp {
                 if let Some(repo) = self.selected_repo() {
                     match repo.manager.restore_snapshot(snap) {
                         Ok(wt) => {
-                            self.status_message =
-                                format!("Restored '{}' from snapshot", wt.name);
+                            self.status_message = format!("Restored '{}' from snapshot", wt.name);
                             self.refresh();
                             self.update_inspector();
                         }
@@ -3233,20 +3182,20 @@ impl ForestApp {
             base_commit.as_deref(),
         );
 
-        let (stat_raw, files_changed, has_commits, commit_count, gitignore_warnings) =
-            match preview {
-                Ok(p) => (
-                    p.diff_stat.raw,
-                    p.diff_stat.files_changed,
-                    p.has_commits,
-                    p.commit_count,
-                    p.gitignore_warnings,
-                ),
-                Err(_) => {
-                    let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
-                    (stat.raw, stat.files_changed, false, 0, Vec::new())
-                }
-            };
+        let (stat_raw, files_changed, has_commits, commit_count, gitignore_warnings) = match preview
+        {
+            Ok(p) => (
+                p.diff_stat.raw,
+                p.diff_stat.files_changed,
+                p.has_commits,
+                p.commit_count,
+                p.gitignore_warnings,
+            ),
+            Err(_) => {
+                let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
+                (stat.raw, stat.files_changed, false, 0, Vec::new())
+            }
+        };
 
         let dialog = ui::dialogs::handoff::HandoffDialog::new(
             wt.name.clone(),
@@ -3311,7 +3260,9 @@ impl ForestApp {
                 .ok()
                 .flatten()
                 .and_then(|dir| {
-                    session::tracker::find_latest_session_id(&dir).ok().flatten()
+                    session::tracker::find_latest_session_id(&dir)
+                        .ok()
+                        .flatten()
                 })
         });
 
@@ -3323,7 +3274,11 @@ impl ForestApp {
 
         match launch_result {
             Ok(pane_id) => {
-                let action = if session_id.is_some() { "Resumed" } else { "Launched" };
+                let action = if session_id.is_some() {
+                    "Resumed"
+                } else {
+                    "Launched"
+                };
 
                 if let Ok(mut state) = repo.manager.load_state() {
                     if let Some(stored) = state.worktrees.get_mut(&wt.name) {
@@ -3336,8 +3291,7 @@ impl ForestApp {
                     let _ = repo.manager.save_state(&state);
                 }
 
-                self.status_message =
-                    format!("{} session for '{}' ({})", action, wt.name, pane_id);
+                self.status_message = format!("{} session for '{}' ({})", action, wt.name, pane_id);
                 self.refresh();
                 self.update_inspector();
             }
@@ -3473,8 +3427,7 @@ impl ForestApp {
             if tasks.is_empty() {
                 self.status_message = "No tasks to dispatch".to_string();
             } else if let Some(repo) = self.selected_repo() {
-                let results =
-                    orchestration::dispatch::dispatch_tasks(&repo.manager, &tasks, &base);
+                let results = orchestration::dispatch::dispatch_tasks(&repo.manager, &tasks, &base);
                 let success_count = results.iter().filter(|r| r.error.is_none()).count();
                 let fail_count = results.iter().filter(|r| r.error.is_some()).count();
 
@@ -3529,19 +3482,15 @@ impl ForestApp {
         if dialog_clone.confirmed {
             let prompt = dialog_clone.prompt_input.trim().to_string();
             if let Some(repo) = self.selected_repo() {
-                let results =
-                    orchestration::broadcast::broadcast_prompt(&repo.worktrees, &prompt);
+                let results = orchestration::broadcast::broadcast_prompt(&repo.worktrees, &prompt);
                 let success_count = results.iter().filter(|r| r.success).count();
                 let fail_count = results.iter().filter(|r| !r.success).count();
 
                 if fail_count == 0 {
-                    self.status_message =
-                        format!("Broadcast sent to {} session(s)", success_count);
+                    self.status_message = format!("Broadcast sent to {} session(s)", success_count);
                 } else {
-                    self.status_message = format!(
-                        "Broadcast: {} sent, {} failed",
-                        success_count, fail_count
-                    );
+                    self.status_message =
+                        format!("Broadcast: {} sent, {} failed", success_count, fail_count);
                 }
             }
             self.dialog = ActiveDialog::None;
@@ -3684,10 +3633,8 @@ impl ForestApp {
                     }
                 }
 
-                self.status_message = format!(
-                    "PR #{} created: {}",
-                    result.pr_number, result.pr_url
-                );
+                self.status_message =
+                    format!("PR #{} created: {}", result.pr_number, result.pr_url);
                 self.refresh();
                 self.update_inspector();
             }
@@ -3713,10 +3660,8 @@ impl ForestApp {
                     }
                 }
 
-                self.status_message = format!(
-                    "Shipped! PR #{}: {}",
-                    result.pr_number, result.pr_url
-                );
+                self.status_message =
+                    format!("Shipped! PR #{}: {}", result.pr_number, result.pr_url);
                 self.refresh();
                 self.update_inspector();
             }

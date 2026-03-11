@@ -21,7 +21,11 @@ pub fn run_setup_script(worktree_path: &Path, config: &SetupConfig) -> Option<Re
         return None;
     }
 
-    Some(execute_script(worktree_path, &config.script, config.timeout_secs))
+    Some(execute_script(
+        worktree_path,
+        &config.script,
+        config.timeout_secs,
+    ))
 }
 
 fn execute_script(worktree_path: &Path, script: &str, timeout_secs: u64) -> Result<SetupResult> {
