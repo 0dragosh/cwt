@@ -1,0 +1,20 @@
+[worktree]
+dir = ".claude/worktrees"
+max_ephemeral = 15
+auto_name = true
+
+[setup]
+script = ""
+timeout_secs = 120
+
+[session]
+auto_launch = true
+claude_args = []
+
+[handoff]
+method = "patch"
+warn_gitignore = true
+
+[ui]
+theme = "default"
+show_diff_stat = true
