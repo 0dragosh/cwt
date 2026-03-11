@@ -1,8 +1,13 @@
 #![allow(dead_code)]
 
+mod app;
 mod config;
 mod git;
+mod hooks;
+mod session;
 mod state;
+mod tmux;
+mod ui;
 mod worktree;
 
 use anyhow::{Context, Result};
@@ -48,7 +53,7 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
-    /// Launch the interactive TUI (coming in Phase 2)
+    /// Launch the interactive TUI
     Tui,
 }
 
@@ -62,10 +67,7 @@ fn main() -> Result<()> {
     let manager = Manager::new(repo_root, config);
 
     match cli.command {
-        None | Some(Commands::Tui) => {
-            println!("TUI not yet implemented — coming in Phase 2.");
-            println!("Use subcommands: cwt list, cwt create, cwt delete");
-        }
+        None | Some(Commands::Tui) => run_tui(manager)?,
         Some(Commands::List) => cmd_list(&manager)?,
         Some(Commands::Create { name, base, carry }) => {
             cmd_create(&manager, name.as_deref(), &base, carry)?
@@ -74,6 +76,53 @@ fn main() -> Result<()> {
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
     }
+
+    Ok(())
+}
+
+fn run_tui(manager: Manager) -> Result<()> {
+    // Set up terminal
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let mut terminal = ratatui::Terminal::new(backend)?;
+
+    // Create app
+    let mut app = app::App::new(manager)?;
+
+    // Refresh counter for periodic status updates
+    let mut tick_count: u32 = 0;
+
+    // Main loop
+    loop {
+        terminal.draw(|f| app.draw(f))?;
+        app.tick()?;
+
+        if app.should_quit {
+            break;
+        }
+
+        // Refresh session statuses periodically (every ~20 ticks = ~5 seconds)
+        tick_count = tick_count.wrapping_add(1);
+        if tick_count.is_multiple_of(20) {
+            app.refresh();
+            app.update_inspector();
+        }
+    }
+
+    // Restore terminal
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
 
     Ok(())
 }
