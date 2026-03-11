@@ -412,8 +412,11 @@ fn cmd_delete(manager: &Manager, name: &str) -> Result<()> {
 }
 
 fn cmd_promote(manager: &Manager, name: &str) -> Result<()> {
-    manager.promote(name)?;
-    println!("Promoted '{}' to permanent", name);
+    if manager.promote(name)? {
+        println!("Promoted '{}' to permanent", name);
+    } else {
+        println!("'{}' is already permanent", name);
+    }
     Ok(())
 }
 

@@ -163,7 +163,8 @@ impl Manager {
     }
 
     /// Promote an ephemeral worktree to permanent.
-    pub fn promote(&self, name: &str) -> Result<()> {
+    /// Returns `Ok(true)` if promoted, `Ok(false)` if already permanent.
+    pub fn promote(&self, name: &str) -> Result<bool> {
         let mut state = self.load_state()?;
 
         let worktree = state
@@ -171,10 +172,14 @@ impl Manager {
             .get_mut(name)
             .with_context(|| format!("worktree '{}' not found", name))?;
 
+        if worktree.lifecycle == Lifecycle::Permanent {
+            return Ok(false);
+        }
+
         worktree.lifecycle = Lifecycle::Permanent;
         self.save_state(&state)?;
 
-        Ok(())
+        Ok(true)
     }
 
     /// Preview what GC would prune: returns list of worktree names that would be deleted.
