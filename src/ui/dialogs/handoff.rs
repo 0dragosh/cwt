@@ -14,17 +14,33 @@ pub struct HandoffDialog {
     pub direction: HandoffDirection,
     pub diff_preview: String,
     pub files_changed: usize,
+    pub has_commits: bool,
+    pub commit_count: usize,
+    pub gitignore_warnings: Vec<String>,
+    pub base_commit: Option<String>,
     pub confirmed: bool,
     pub cancelled: bool,
 }
 
 impl HandoffDialog {
-    pub fn new(worktree_name: String, diff_preview: String, files_changed: usize) -> Self {
+    pub fn new(
+        worktree_name: String,
+        diff_preview: String,
+        files_changed: usize,
+        has_commits: bool,
+        commit_count: usize,
+        gitignore_warnings: Vec<String>,
+        base_commit: Option<String>,
+    ) -> Self {
         Self {
             worktree_name,
             direction: HandoffDirection::WorktreeToLocal,
             diff_preview,
             files_changed,
+            has_commits,
+            commit_count,
+            gitignore_warnings,
+            base_commit,
             confirmed: false,
             cancelled: false,
         }
@@ -40,7 +56,10 @@ impl HandoffDialog {
 
 /// Render the handoff dialog.
 pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
-    let area = centered_rect(65, 18, f.area());
+    let has_warnings = !dialog.gitignore_warnings.is_empty();
+    let has_commits_info = dialog.has_commits && dialog.direction == HandoffDirection::WorktreeToLocal;
+    let extra_height: u16 = if has_warnings { 3 } else { 0 } + if has_commits_info { 1 } else { 0 };
+    let area = centered_rect(65, 18 + extra_height, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -51,16 +70,26 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let mut constraints = vec![
+        Constraint::Length(3), // direction selector
+        Constraint::Length(1), // separator
+    ];
+    if has_commits_info {
+        constraints.push(Constraint::Length(1)); // commit info
+    }
+    constraints.push(Constraint::Min(5)); // diff preview
+    if has_warnings {
+        constraints.push(Constraint::Length(3)); // gitignore warnings
+    }
+    constraints.push(Constraint::Length(2)); // buttons
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // direction selector
-            Constraint::Length(1), // separator
-            Constraint::Min(5),   // diff preview
-            Constraint::Length(2), // buttons
-        ])
+        .constraints(constraints)
         .margin(1)
         .split(inner);
+
+    let mut chunk_idx = 0;
 
     // Direction selector
     let (left_style, right_style) = match dialog.direction {
@@ -88,20 +117,36 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
             Span::styled(" Local → Worktree ", right_style),
         ]),
     ];
-    f.render_widget(Paragraph::new(direction_lines), chunks[0]);
+    f.render_widget(Paragraph::new(direction_lines), chunks[chunk_idx]);
+    chunk_idx += 1;
 
     // Separator
-    let sep = Paragraph::new("─".repeat(chunks[1].width as usize))
+    let sep = Paragraph::new("─".repeat(chunks[chunk_idx].width as usize))
         .style(Style::default().fg(Color::DarkGray));
-    f.render_widget(sep, chunks[1]);
+    f.render_widget(sep, chunks[chunk_idx]);
+    chunk_idx += 1;
+
+    // Commit info (only for WT→Local when there are commits)
+    if has_commits_info {
+        let commit_info = Line::from(vec![
+            Span::styled(
+                format!("{} commit(s)", dialog.commit_count),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" will be applied via format-patch/am"),
+        ]);
+        f.render_widget(Paragraph::new(commit_info), chunks[chunk_idx]);
+        chunk_idx += 1;
+    }
 
     // Diff preview
+    let diff_area = chunks[chunk_idx];
     let mut diff_lines: Vec<Line> = Vec::new();
     diff_lines.push(Line::from(Span::styled(
         format!("{} file(s) to transfer:", dialog.files_changed),
         theme::help_key_style(),
     )));
-    for line in dialog.diff_preview.lines().take(chunks[2].height as usize - 1) {
+    for line in dialog.diff_preview.lines().take(diff_area.height as usize - 1) {
         let style = if line.starts_with('+') {
             theme::diff_add_style()
         } else if line.starts_with('-') {
@@ -111,9 +156,31 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         };
         diff_lines.push(Line::from(Span::styled(line.to_string(), style)));
     }
+    f.render_widget(Paragraph::new(diff_lines).wrap(Wrap { trim: false }), diff_area);
+    chunk_idx += 1;
 
-    let diff = Paragraph::new(diff_lines).wrap(Wrap { trim: false });
-    f.render_widget(diff, chunks[2]);
+    // Gitignore warnings
+    if has_warnings {
+        let warn_count = dialog.gitignore_warnings.len();
+        let mut warn_lines = vec![Line::from(Span::styled(
+            format!("{} untracked file(s) won't transfer:", warn_count),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))];
+        for file in dialog.gitignore_warnings.iter().take(2) {
+            warn_lines.push(Line::from(Span::styled(
+                format!("  {}", file),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+        if warn_count > 2 {
+            warn_lines.push(Line::from(Span::styled(
+                format!("  ...and {} more", warn_count - 2),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        f.render_widget(Paragraph::new(warn_lines), chunks[chunk_idx]);
+        chunk_idx += 1;
+    }
 
     // Buttons
     let buttons = Line::from(vec![
@@ -127,7 +194,7 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         Span::raw("  "),
         Span::styled("[Esc] Cancel", Style::default().fg(Color::Gray)),
     ]);
-    f.render_widget(Paragraph::new(buttons), chunks[3]);
+    f.render_widget(Paragraph::new(buttons), chunks[chunk_idx]);
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {

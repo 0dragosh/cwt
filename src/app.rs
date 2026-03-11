@@ -18,6 +18,7 @@ pub enum ActiveDialog {
     Delete(ui::dialogs::delete::DeleteDialog),
     Handoff(ui::dialogs::handoff::HandoffDialog),
     Gc(ui::dialogs::gc::GcDialog),
+    Restore(ui::dialogs::restore::RestoreDialog),
     Help,
 }
 
@@ -200,6 +201,7 @@ impl App {
             ActiveDialog::Delete(d) => ui::dialogs::delete::render(frame, d),
             ActiveDialog::Handoff(d) => ui::dialogs::handoff::render(frame, d),
             ActiveDialog::Gc(d) => ui::dialogs::gc::render(frame, d),
+            ActiveDialog::Restore(d) => ui::dialogs::restore::render(frame, d),
             ActiveDialog::Help => ui::help::render(frame),
         }
     }
@@ -239,6 +241,7 @@ impl App {
             ActiveDialog::Delete(_) => self.handle_delete_key(key),
             ActiveDialog::Handoff(_) => self.handle_handoff_key(key),
             ActiveDialog::Gc(_) => self.handle_gc_key(key),
+            ActiveDialog::Restore(_) => self.handle_restore_key(key),
         }
     }
 
@@ -285,6 +288,9 @@ impl App {
             }
             KeyCode::Char('g') => {
                 self.open_gc_dialog()?;
+            }
+            KeyCode::Char('r') => {
+                self.open_restore_dialog()?;
             }
             KeyCode::Enter => {
                 self.open_shell()?;
@@ -458,6 +464,7 @@ impl App {
                     dialog_clone.direction,
                     &wt_abs,
                     &self.manager.repo_root,
+                    dialog_clone.base_commit.as_deref(),
                 ) {
                     Ok(()) => {
                         let dir_str = match dialog_clone.direction {
@@ -579,12 +586,38 @@ impl App {
         };
 
         let wt_abs = self.manager.worktree_abs_path(wt);
-        let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
+        let base_commit = Some(wt.base_commit.clone());
+
+        let preview = handoff::preview(
+            HandoffDirection::WorktreeToLocal,
+            &wt_abs,
+            &self.manager.repo_root,
+            base_commit.as_deref(),
+        );
+
+        let (stat_raw, files_changed, has_commits, commit_count, gitignore_warnings) =
+            match preview {
+                Ok(p) => (
+                    p.diff_stat.raw,
+                    p.diff_stat.files_changed,
+                    p.has_commits,
+                    p.commit_count,
+                    p.gitignore_warnings,
+                ),
+                Err(_) => {
+                    let stat = git::diff::diff_stat(&wt_abs).unwrap_or_default();
+                    (stat.raw, stat.files_changed, false, 0, Vec::new())
+                }
+            };
 
         let dialog = ui::dialogs::handoff::HandoffDialog::new(
             wt.name.clone(),
-            stat.raw.clone(),
-            stat.files_changed,
+            stat_raw,
+            files_changed,
+            has_commits,
+            commit_count,
+            gitignore_warnings,
+            base_commit,
         );
         self.dialog = ActiveDialog::Handoff(dialog);
         Ok(())
@@ -688,6 +721,60 @@ impl App {
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
             }
+        }
+
+        Ok(())
+    }
+
+    fn open_restore_dialog(&mut self) -> Result<()> {
+        let snapshots = self.manager.list_snapshots()?;
+        let dialog = ui::dialogs::restore::RestoreDialog::new(snapshots);
+        self.dialog = ActiveDialog::Restore(dialog);
+        Ok(())
+    }
+
+    /// Handle keys in the restore dialog.
+    fn handle_restore_key(&mut self, key: KeyEvent) -> Result<()> {
+        let ActiveDialog::Restore(ref mut dialog) = self.dialog else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                dialog.move_selection(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                dialog.move_selection(-1);
+            }
+            KeyCode::Enter => {
+                if !dialog.snapshots.is_empty() {
+                    dialog.confirmed = true;
+                }
+            }
+            KeyCode::Esc => {
+                dialog.cancelled = true;
+            }
+            _ => {}
+        }
+
+        let dialog_clone = dialog.clone();
+        if dialog_clone.confirmed {
+            if let Some(snap) = dialog_clone.selected_snapshot() {
+                match self.manager.restore_snapshot(snap) {
+                    Ok(wt) => {
+                        self.status_message =
+                            format!("Restored '{}' from snapshot", wt.name);
+                        self.refresh();
+                        self.update_inspector();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Restore error: {}", e);
+                    }
+                }
+            }
+            self.dialog = ActiveDialog::None;
+        } else if dialog_clone.cancelled {
+            self.dialog = ActiveDialog::None;
         }
 
         Ok(())
