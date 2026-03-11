@@ -2,6 +2,15 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
+/// Information about a tmux pane.
+#[derive(Debug, Clone)]
+pub struct PaneInfo {
+    pub pane_id: String,
+    pub pane_title: String,
+    pub current_command: String,
+    pub is_active: bool,
+}
+
 /// Check if we're currently running inside a tmux session.
 pub fn is_inside_tmux() -> bool {
     std::env::var("TMUX").is_ok()
@@ -52,24 +61,13 @@ pub fn kill_pane(pane_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check if a pane is still alive.
+/// Check if a pane is still alive by querying its pane_id.
 pub fn pane_exists(pane_id: &str) -> bool {
-    let result = Command::new("tmux")
-        .args(["has-session", "-t", pane_id])
-        .output();
-
-    // has-session works for panes too via target specification
-    // but a more reliable check is list-panes
-    match Command::new("tmux")
+    Command::new("tmux")
         .args(["display-message", "-t", pane_id, "-p", "#{pane_id}"])
         .output()
-    {
-        Ok(output) => output.status.success(),
-        Err(_) => {
-            // Fallback
-            result.map(|o| o.status.success()).unwrap_or(false)
-        }
-    }
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Get the current command running in a pane.
@@ -82,6 +80,41 @@ pub fn pane_current_command(pane_id: &str) -> Result<String> {
         "#{pane_current_command}",
     ])?;
     Ok(output.trim().to_string())
+}
+
+/// List all panes in the current tmux session with their info.
+pub fn list_panes() -> Result<Vec<PaneInfo>> {
+    let output = tmux(&[
+        "list-panes",
+        "-s", // all panes in session
+        "-F",
+        "#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_active}",
+    ])?;
+
+    let mut panes = Vec::new();
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 4 {
+            panes.push(PaneInfo {
+                pane_id: parts[0].to_string(),
+                pane_title: parts[1].to_string(),
+                current_command: parts[2].to_string(),
+                is_active: parts[3] == "1",
+            });
+        }
+    }
+
+    Ok(panes)
+}
+
+/// Get the PID of the process running in a pane.
+pub fn pane_pid(pane_id: &str) -> Result<u32> {
+    let output = tmux(&["display-message", "-t", pane_id, "-p", "#{pane_pid}"])?;
+    let pid: u32 = output
+        .trim()
+        .parse()
+        .with_context(|| format!("invalid pid for pane {}", pane_id))?;
+    Ok(pid)
 }
 
 /// Send keys to a pane (e.g., for sending input).
