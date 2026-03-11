@@ -14,7 +14,12 @@ pub fn install_hooks(repo_root: &Path) -> Result<()> {
 
     // Write hook scripts for each event type
     write_hook_script(&hooks_dir, "stop", "session_stopped", &sock_str)?;
-    write_hook_script(&hooks_dir, "notification", "session_notification", &sock_str)?;
+    write_hook_script(
+        &hooks_dir,
+        "notification",
+        "session_notification",
+        &sock_str,
+    )?;
     write_hook_script(&hooks_dir, "subagent_stop", "subagent_stopped", &sock_str)?;
 
     // Patch .claude/settings.json to register the hooks
@@ -187,8 +192,8 @@ fn patch_claude_settings(repo_root: &Path, hooks_dir: &Path) -> Result<()> {
         }
     }
 
-    let content = serde_json::to_string_pretty(&settings)
-        .context("failed to serialize settings.json")?;
+    let content =
+        serde_json::to_string_pretty(&settings).context("failed to serialize settings.json")?;
     std::fs::write(&settings_path, content)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
 
@@ -226,8 +231,8 @@ fn unpatch_claude_settings(repo_root: &Path) -> Result<()> {
         }
     }
 
-    let content = serde_json::to_string_pretty(&settings)
-        .context("failed to serialize settings.json")?;
+    let content =
+        serde_json::to_string_pretty(&settings).context("failed to serialize settings.json")?;
     std::fs::write(&settings_path, content)
         .with_context(|| format!("failed to write {}", settings_path.display()))?;
 

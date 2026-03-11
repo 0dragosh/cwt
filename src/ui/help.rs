@@ -21,40 +21,55 @@ pub fn render(f: &mut Frame, scroll: u16) {
     f.render_widget(block, area);
 
     let sections = vec![
-        ("Worktree Actions", vec![
-            ("n", "New worktree"),
-            ("s", "Launch/resume Claude session"),
-            ("h", "Handoff changes (worktree <-> local)"),
-            ("p", "Promote ephemeral to permanent"),
-            ("d", "Delete worktree (saves snapshot)"),
-            ("g", "Run garbage collection"),
-            ("r", "Restore from snapshot"),
-            ("Enter", "Open shell in worktree (tmux pane)"),
-        ]),
-        ("Orchestration", vec![
-            ("t", "Dispatch tasks (multi-worktree)"),
-            ("b", "Broadcast prompt to all sessions"),
-        ]),
-        ("Ship Pipeline", vec![
-            ("P", "Create PR (push + gh pr create)"),
-            ("S", "Ship it (push + PR + mark shipping)"),
-            ("c", "Open CI logs in browser"),
-        ]),
-        ("Navigation", vec![
-            ("j / Down", "Move down / scroll inspector"),
-            ("k / Up", "Move up / scroll inspector"),
-            ("Tab", "Switch panel focus (fwd)"),
-            ("Shift+Tab", "Switch panel focus (back)"),
-            ("R", "Switch to repo panel (forest mode)"),
-            ("/", "Filter/search worktrees"),
-            ("Esc", "Clear filter / close dialog"),
-            ("Mouse", "Click to select, scroll to navigate"),
-        ]),
-        ("General", vec![
-            ("?", "Toggle this help"),
-            ("q", "Quit cwt"),
-            ("Ctrl+C", "Force quit"),
-        ]),
+        (
+            "Worktree Actions",
+            vec![
+                ("n", "New worktree"),
+                ("s", "Launch/resume Claude session"),
+                ("h", "Handoff changes (worktree <-> local)"),
+                ("p", "Promote ephemeral to permanent"),
+                ("d", "Delete worktree (saves snapshot)"),
+                ("g", "Run garbage collection"),
+                ("r", "Restore from snapshot"),
+                ("Enter", "Open shell in worktree (tmux pane)"),
+            ],
+        ),
+        (
+            "Orchestration",
+            vec![
+                ("t", "Dispatch tasks (multi-worktree)"),
+                ("b", "Broadcast prompt to all sessions"),
+            ],
+        ),
+        (
+            "Ship Pipeline",
+            vec![
+                ("P", "Create PR (push + gh pr create)"),
+                ("S", "Ship it (push + PR + mark shipping)"),
+                ("c", "Open CI logs in browser"),
+            ],
+        ),
+        (
+            "Navigation",
+            vec![
+                ("j / Down", "Move down / scroll inspector"),
+                ("k / Up", "Move up / scroll inspector"),
+                ("Tab", "Switch panel focus (fwd)"),
+                ("Shift+Tab", "Switch panel focus (back)"),
+                ("R", "Switch to repo panel (forest mode)"),
+                ("/", "Filter/search worktrees"),
+                ("Esc", "Clear filter / close dialog"),
+                ("Mouse", "Click to select, scroll to navigate"),
+            ],
+        ),
+        (
+            "General",
+            vec![
+                ("?", "Toggle this help"),
+                ("q", "Quit cwt"),
+                ("Ctrl+C", "Force quit"),
+            ],
+        ),
     ];
 
     let mut lines: Vec<Line> = Vec::new();
@@ -69,10 +84,7 @@ pub fn render(f: &mut Frame, scroll: u16) {
         for (key, desc) in bindings {
             lines.push(Line::from(vec![
                 Span::raw("    "),
-                Span::styled(
-                    format!("{:>10}", key),
-                    theme::help_key_style(),
-                ),
+                Span::styled(format!("{:>10}", key), theme::help_key_style()),
                 Span::raw("  "),
                 Span::styled(*desc, theme::help_desc_style()),
             ]));

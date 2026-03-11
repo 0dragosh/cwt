@@ -119,14 +119,7 @@ pub fn build_image(
     };
 
     let output = Command::new(runtime.cmd())
-        .args([
-            "build",
-            "-f",
-            &containerfile_path,
-            "-t",
-            image_tag,
-            ".",
-        ])
+        .args(["build", "-f", &containerfile_path, "-t", image_tag, "."])
         .current_dir(context_dir)
         .output()
         .with_context(|| format!("failed to run {} build", runtime.cmd()))?;
@@ -206,9 +199,7 @@ pub fn run_container(
         anyhow::bail!("{} run failed: {}", runtime.cmd(), stderr.trim());
     }
 
-    let container_id = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Truncate to short ID (12 chars)
     let short_id = if container_id.len() > 12 {
@@ -296,21 +287,13 @@ pub fn remove_container(runtime: &ContainerRuntime, container_id: &str) -> Resul
 }
 
 /// Check the status of a container.
-pub fn inspect_container_status(
-    runtime: &ContainerRuntime,
-    container_id: &str,
-) -> ContainerStatus {
+pub fn inspect_container_status(runtime: &ContainerRuntime, container_id: &str) -> ContainerStatus {
     if *runtime == ContainerRuntime::None {
         return ContainerStatus::None;
     }
 
     let output = Command::new(runtime.cmd())
-        .args([
-            "inspect",
-            "--format",
-            "{{.State.Status}}",
-            container_id,
-        ])
+        .args(["inspect", "--format", "{{.State.Status}}", container_id])
         .output();
 
     match output {
@@ -329,10 +312,7 @@ pub fn inspect_container_status(
 
 /// Get resource stats for a running container (CPU%, Memory).
 /// Returns (cpu_percent, memory_bytes, memory_limit_bytes) or None.
-pub fn container_stats(
-    runtime: &ContainerRuntime,
-    container_id: &str,
-) -> Option<(f64, u64, u64)> {
+pub fn container_stats(runtime: &ContainerRuntime, container_id: &str) -> Option<(f64, u64, u64)> {
     if *runtime == ContainerRuntime::None {
         return None;
     }
@@ -361,10 +341,7 @@ pub fn container_stats(
     }
 
     // Parse CPU percent (e.g., "5.23%")
-    let cpu = parts[0]
-        .trim_end_matches('%')
-        .parse::<f64>()
-        .unwrap_or(0.0);
+    let cpu = parts[0].trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
 
     // Parse memory usage (e.g., "128.5MiB / 8GiB")
     let mem_parts: Vec<&str> = parts[1].split('/').collect();
@@ -408,9 +385,7 @@ pub fn setup_container(
 ) -> Result<ContainerInfo> {
     let runtime = detect_runtime();
     if runtime == ContainerRuntime::None {
-        anyhow::bail!(
-            "no container runtime found (install podman or docker)"
-        );
+        anyhow::bail!("no container runtime found (install podman or docker)");
     }
 
     let image_tag = format!("cwt-{}", worktree_name);

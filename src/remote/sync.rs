@@ -15,11 +15,7 @@ pub enum RemoteSyncDirection {
 
 /// Push the local branch to the remote repository via git push.
 /// This is the primary sync mechanism for code changes.
-pub fn git_push_to_remote(
-    local_repo_root: &Path,
-    branch: &str,
-    remote_name: &str,
-) -> Result<()> {
+pub fn git_push_to_remote(local_repo_root: &Path, branch: &str, remote_name: &str) -> Result<()> {
     let output = Command::new("git")
         .args(["push", remote_name, branch])
         .current_dir(local_repo_root)
@@ -44,17 +40,13 @@ pub fn git_pull_on_remote(
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
 
-    let cmd = format!(
-        "cd '{}' && git pull origin '{}' --ff-only",
-        wt_path, branch
-    );
-    host.ssh_exec(&cmd)
-        .with_context(|| {
-            format!(
-                "failed to pull on remote worktree '{}' on '{}'",
-                worktree_name, host.name
-            )
-        })?;
+    let cmd = format!("cd '{}' && git pull origin '{}' --ff-only", wt_path, branch);
+    host.ssh_exec(&cmd).with_context(|| {
+        format!(
+            "failed to pull on remote worktree '{}' on '{}'",
+            worktree_name, host.name
+        )
+    })?;
 
     Ok(())
 }
@@ -153,18 +145,13 @@ fn apply_patch_on_remote(
 }
 
 /// Sync state: fetch the list of worktrees on the remote host for a given repo.
-pub fn list_remote_worktrees(
-    host: &RemoteHost,
-    repo_name: &str,
-) -> Result<Vec<String>> {
+pub fn list_remote_worktrees(host: &RemoteHost, repo_name: &str) -> Result<Vec<String>> {
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_dir = format!("{}/worktrees", repo_path);
 
     // Check if the worktrees directory exists
-    let (stdout, _, success) = host.ssh_exec_fallible(&format!(
-        "test -d '{}' && ls -1 '{}'",
-        wt_dir, wt_dir
-    ))?;
+    let (stdout, _, success) =
+        host.ssh_exec_fallible(&format!("test -d '{}' && ls -1 '{}'", wt_dir, wt_dir))?;
 
     if !success {
         return Ok(Vec::new());

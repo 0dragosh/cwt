@@ -295,7 +295,8 @@ impl Manager {
 
         // Create a new worktree from the base branch
         let name = snap.name.clone();
-        let wt = self.create(Some(&name), &snap.base_branch, false)
+        let wt = self
+            .create(Some(&name), &snap.base_branch, false)
             .with_context(|| format!("failed to create worktree for restore of '{}'", name))?;
 
         let wt_abs_path = self.worktree_abs_path(&wt);

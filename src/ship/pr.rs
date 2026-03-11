@@ -169,9 +169,7 @@ pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
     let transcript_summary = session::tracker::find_project_dir(worktree_path)
         .ok()
         .flatten()
-        .and_then(|dir| {
-            session::transcript::read_last_messages(&dir, 3).ok()
-        })
+        .and_then(|dir| session::transcript::read_last_messages(&dir, 3).ok())
         .map(|messages| {
             let mut summary = String::new();
             for msg in &messages {
@@ -254,7 +252,10 @@ pub fn create_pr(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    Ok(PrCreateResult { pr_number, pr_url: url })
+    Ok(PrCreateResult {
+        pr_number,
+        pr_url: url,
+    })
 }
 
 /// Fetch the current PR status for a branch using `gh pr view`.
@@ -286,10 +287,7 @@ pub fn fetch_pr_status(repo_path: &Path, branch: &str) -> (PrStatus, Option<u64>
         .get("url")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let state = json
-        .get("state")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let state = json.get("state").and_then(|v| v.as_str()).unwrap_or("");
     let is_draft = json
         .get("isDraft")
         .and_then(|v| v.as_bool())
@@ -318,10 +316,7 @@ pub fn fetch_pr_status(repo_path: &Path, branch: &str) -> (PrStatus, Option<u64>
 }
 
 /// Fetch PR status by PR number (for known PRs).
-pub fn fetch_pr_status_by_number(
-    repo_path: &Path,
-    pr_number: u64,
-) -> (PrStatus, Option<String>) {
+pub fn fetch_pr_status_by_number(repo_path: &Path, pr_number: u64) -> (PrStatus, Option<String>) {
     let output = Command::new("gh")
         .args([
             "pr",
@@ -348,10 +343,7 @@ pub fn fetch_pr_status_by_number(
         .get("url")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let state = json
-        .get("state")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let state = json.get("state").and_then(|v| v.as_str()).unwrap_or("");
     let is_draft = json
         .get("isDraft")
         .and_then(|v| v.as_bool())

@@ -76,11 +76,7 @@ impl RemoteHost {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!(
-                "SSH command failed on '{}': {}",
-                self.name,
-                stderr.trim()
-            );
+            anyhow::bail!("SSH command failed on '{}': {}", self.name, stderr.trim());
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -115,9 +111,7 @@ impl RemoteHost {
         cmd.arg(self.ssh_dest());
         cmd.arg("echo ok");
 
-        cmd.output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        cmd.output().map(|o| o.status.success()).unwrap_or(false)
     }
 
     /// Measure round-trip latency to the remote host.
@@ -176,8 +170,7 @@ impl RemoteHost {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
 
         // Check if repo already exists
-        let (_, _, exists) =
-            self.ssh_exec_fallible(&format!("test -d '{}/.git'", repo_path))?;
+        let (_, _, exists) = self.ssh_exec_fallible(&format!("test -d '{}/.git'", repo_path))?;
 
         if !exists {
             self.ensure_worktree_dir()?;
@@ -215,18 +208,18 @@ impl RemoteHost {
             "cd '{}' && git worktree add '{}' -b '{}' '{}'",
             repo_path, wt_path, branch_name, base_branch
         );
-        self.ssh_exec(&cmd)
-            .with_context(|| format!("failed to create worktree '{}' on '{}'", worktree_name, self.name))?;
+        self.ssh_exec(&cmd).with_context(|| {
+            format!(
+                "failed to create worktree '{}' on '{}'",
+                worktree_name, self.name
+            )
+        })?;
 
         Ok(wt_path)
     }
 
     /// Remove a git worktree on the remote host.
-    pub fn remove_worktree(
-        &self,
-        repo_name: &str,
-        worktree_name: &str,
-    ) -> Result<()> {
+    pub fn remove_worktree(&self, repo_name: &str, worktree_name: &str) -> Result<()> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
 
@@ -234,8 +227,12 @@ impl RemoteHost {
             "cd '{}' && git worktree remove --force '{}'",
             repo_path, wt_path
         );
-        self.ssh_exec(&cmd)
-            .with_context(|| format!("failed to remove remote worktree '{}' on '{}'", worktree_name, self.name))?;
+        self.ssh_exec(&cmd).with_context(|| {
+            format!(
+                "failed to remove remote worktree '{}' on '{}'",
+                worktree_name, self.name
+            )
+        })?;
 
         Ok(())
     }
@@ -247,11 +244,7 @@ impl RemoteHost {
     }
 
     /// Get the diff stat of a remote worktree.
-    pub fn diff_stat(
-        &self,
-        repo_name: &str,
-        worktree_name: &str,
-    ) -> Result<String> {
+    pub fn diff_stat(&self, repo_name: &str, worktree_name: &str) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
         let cmd = format!("cd '{}' && git diff --stat", wt_path);
@@ -259,11 +252,7 @@ impl RemoteHost {
     }
 
     /// Get the full diff of a remote worktree.
-    pub fn diff_full(
-        &self,
-        repo_name: &str,
-        worktree_name: &str,
-    ) -> Result<String> {
+    pub fn diff_full(&self, repo_name: &str, worktree_name: &str) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
         let cmd = format!("cd '{}' && git diff", wt_path);
@@ -271,11 +260,7 @@ impl RemoteHost {
     }
 
     /// Check if a remote worktree has uncommitted changes.
-    pub fn is_dirty(
-        &self,
-        repo_name: &str,
-        worktree_name: &str,
-    ) -> Result<bool> {
+    pub fn is_dirty(&self, repo_name: &str, worktree_name: &str) -> Result<bool> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
         let cmd = format!("cd '{}' && git status --porcelain", wt_path);

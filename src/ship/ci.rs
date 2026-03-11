@@ -36,14 +36,8 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
         return CiStatus::None;
     };
 
-    let status = run
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let conclusion = run
-        .get("conclusion")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
 
     match status {
         "completed" => match conclusion {
@@ -61,14 +55,7 @@ pub fn open_ci_logs(repo_path: &Path, branch: &str) -> Result<()> {
     // Get the latest run URL
     let output = Command::new("gh")
         .args([
-            "run",
-            "list",
-            "--branch",
-            branch,
-            "--limit",
-            "1",
-            "--json",
-            "url",
+            "run", "list", "--branch", branch, "--limit", "1", "--json", "url",
         ])
         .current_dir(repo_path)
         .output()?;
@@ -89,10 +76,7 @@ pub fn open_ci_logs(repo_path: &Path, branch: &str) -> Result<()> {
                 "xdg-open"
             };
 
-            Command::new(open_cmd)
-                .arg(url)
-                .spawn()
-                .ok();
+            Command::new(open_cmd).arg(url).spawn().ok();
 
             return Ok(());
         }

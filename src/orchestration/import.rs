@@ -27,9 +27,7 @@ pub struct ImportResult {
 /// Fetch open GitHub issues using the `gh` CLI.
 pub fn fetch_github_issues(repo_root: &Path, limit: usize) -> Result<Vec<Issue>> {
     // Check that gh is available
-    which::which("gh").context(
-        "gh CLI not found on PATH. Install it: https://cli.github.com/",
-    )?;
+    which::which("gh").context("gh CLI not found on PATH. Install it: https://cli.github.com/")?;
 
     let output = Command::new("gh")
         .args([

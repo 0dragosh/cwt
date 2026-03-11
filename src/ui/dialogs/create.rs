@@ -38,7 +38,12 @@ impl CreateDialog {
             .iter()
             .find(|b| *b == "main" || *b == "master")
             .cloned()
-            .unwrap_or_else(|| branches.first().cloned().unwrap_or_else(|| "main".to_string()));
+            .unwrap_or_else(|| {
+                branches
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string())
+            });
 
         let branch_index = branches
             .iter()
@@ -71,17 +76,29 @@ impl CreateDialog {
 
     /// Get the field index for the carry checkbox.
     pub fn carry_field(&self) -> usize {
-        if self.has_remotes() { 3 } else { 2 }
+        if self.has_remotes() {
+            3
+        } else {
+            2
+        }
     }
 
     /// Get the field index for the confirm button.
     pub fn confirm_field(&self) -> usize {
-        if self.has_remotes() { 4 } else { 3 }
+        if self.has_remotes() {
+            4
+        } else {
+            3
+        }
     }
 
     /// Get the field index for the remote selector.
     pub fn remote_field(&self) -> Option<usize> {
-        if self.has_remotes() { Some(2) } else { None }
+        if self.has_remotes() {
+            Some(2)
+        } else {
+            None
+        }
     }
 
     pub fn next_field(&mut self) {
@@ -89,7 +106,11 @@ impl CreateDialog {
     }
 
     pub fn prev_field(&mut self) {
-        self.focus = if self.focus == 0 { self.field_count - 1 } else { self.focus - 1 };
+        self.focus = if self.focus == 0 {
+            self.field_count - 1
+        } else {
+            self.focus - 1
+        };
     }
 
     pub fn next_branch(&mut self) {
@@ -275,10 +296,7 @@ pub fn render(f: &mut Frame, dialog: &CreateDialog) {
     let checkbox = if dialog.carry_changes { "[x]" } else { "[ ]" };
     let carry_label = Line::from(vec![
         Span::styled("Carry:  ", theme::help_key_style()),
-        Span::styled(
-            format!("{} carry local changes", checkbox),
-            carry_style,
-        ),
+        Span::styled(format!("{} carry local changes", checkbox), carry_style),
     ]);
     f.render_widget(Paragraph::new(carry_label), chunks[carry_chunk]);
 

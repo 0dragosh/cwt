@@ -28,20 +28,15 @@ pub fn launch_remote_session(
     // Create a tmux session on the remote host and run claude in it
     let remote_cmd = format!(
         "tmux new-session -d -s '{}' -c '{}' '{}' 2>/dev/null || tmux send-keys -t '{}' '{}' Enter",
-        tmux_session,
-        wt_path,
-        claude_cmd,
-        tmux_session,
-        claude_cmd,
+        tmux_session, wt_path, claude_cmd, tmux_session, claude_cmd,
     );
 
-    host.ssh_exec(&remote_cmd)
-        .with_context(|| {
-            format!(
-                "failed to launch remote session for '{}' on '{}'",
-                worktree_name, host.name
-            )
-        })?;
+    host.ssh_exec(&remote_cmd).with_context(|| {
+        format!(
+            "failed to launch remote session for '{}' on '{}'",
+            worktree_name, host.name
+        )
+    })?;
 
     Ok(tmux_session)
 }
@@ -68,11 +63,7 @@ pub fn resume_remote_session(
 
     let remote_cmd = format!(
         "tmux new-session -d -s '{}' -c '{}' '{}' 2>/dev/null || tmux send-keys -t '{}' '{}' Enter",
-        tmux_session,
-        wt_path,
-        claude_cmd,
-        tmux_session,
-        claude_cmd,
+        tmux_session, wt_path, claude_cmd, tmux_session, claude_cmd,
     );
 
     host.ssh_exec(&remote_cmd)?;
@@ -81,10 +72,7 @@ pub fn resume_remote_session(
 
 /// Focus/attach to a remote session by opening an SSH connection with tmux attach.
 /// This opens a local tmux pane that SSHs into the remote and attaches to the session.
-pub fn focus_remote_session(
-    host: &RemoteHost,
-    worktree_name: &str,
-) -> Result<String> {
+pub fn focus_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<String> {
     let tmux_session = format!("cwt-{}", worktree_name);
 
     // Build SSH command to attach to remote tmux session
@@ -121,12 +109,12 @@ pub fn focus_remote_session(
 }
 
 /// Check if a remote tmux session is still running.
-pub fn is_remote_session_alive(
-    host: &RemoteHost,
-    worktree_name: &str,
-) -> bool {
+pub fn is_remote_session_alive(host: &RemoteHost, worktree_name: &str) -> bool {
     let tmux_session = format!("cwt-{}", worktree_name);
-    let cmd = format!("tmux has-session -t '{}' 2>/dev/null && echo alive", tmux_session);
+    let cmd = format!(
+        "tmux has-session -t '{}' 2>/dev/null && echo alive",
+        tmux_session
+    );
 
     host.ssh_exec_fallible(&cmd)
         .map(|(stdout, _, success)| success && stdout.trim() == "alive")
@@ -134,22 +122,19 @@ pub fn is_remote_session_alive(
 }
 
 /// Kill a remote tmux session.
-pub fn kill_remote_session(
-    host: &RemoteHost,
-    worktree_name: &str,
-) -> Result<()> {
+pub fn kill_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<()> {
     let tmux_session = format!("cwt-{}", worktree_name);
-    let cmd = format!("tmux kill-session -t '{}' 2>/dev/null || true", tmux_session);
+    let cmd = format!(
+        "tmux kill-session -t '{}' 2>/dev/null || true",
+        tmux_session
+    );
     let _ = host.ssh_exec_fallible(&cmd);
     Ok(())
 }
 
 /// Get the status of a remote session by checking its tmux pane.
 /// Returns a rough status based on whether the session exists and what command is running.
-pub fn check_remote_session_status(
-    host: &RemoteHost,
-    worktree_name: &str,
-) -> RemoteSessionStatus {
+pub fn check_remote_session_status(host: &RemoteHost, worktree_name: &str) -> RemoteSessionStatus {
     let tmux_session = format!("cwt-{}", worktree_name);
 
     // Check if tmux session exists

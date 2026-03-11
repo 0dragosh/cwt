@@ -57,7 +57,8 @@ impl HandoffDialog {
 /// Render the handoff dialog.
 pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
     let has_warnings = !dialog.gitignore_warnings.is_empty();
-    let has_commits_info = dialog.has_commits && dialog.direction == HandoffDirection::WorktreeToLocal;
+    let has_commits_info =
+        dialog.has_commits && dialog.direction == HandoffDirection::WorktreeToLocal;
     let extra_height: u16 = if has_warnings { 3 } else { 0 } + if has_commits_info { 1 } else { 0 };
     let area = centered_rect(65, 18 + extra_height, f.area());
     f.render_widget(Clear, area);
@@ -110,7 +111,10 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
     };
 
     let direction_lines = vec![
-        Line::from(Span::styled("Direction (Tab to toggle):", theme::help_key_style())),
+        Line::from(Span::styled(
+            "Direction (Tab to toggle):",
+            theme::help_key_style(),
+        )),
         Line::from(vec![
             Span::styled(" Worktree → Local ", left_style),
             Span::raw("  "),
@@ -131,7 +135,9 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         let commit_info = Line::from(vec![
             Span::styled(
                 format!("{} commit(s)", dialog.commit_count),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" will be applied via format-patch/am"),
         ]);
@@ -146,7 +152,11 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         format!("{} file(s) to transfer:", dialog.files_changed),
         theme::help_key_style(),
     )));
-    for line in dialog.diff_preview.lines().take(diff_area.height as usize - 1) {
+    for line in dialog
+        .diff_preview
+        .lines()
+        .take(diff_area.height as usize - 1)
+    {
         let style = if line.starts_with('+') {
             theme::diff_add_style()
         } else if line.starts_with('-') {
@@ -156,7 +166,10 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         };
         diff_lines.push(Line::from(Span::styled(line.to_string(), style)));
     }
-    f.render_widget(Paragraph::new(diff_lines).wrap(Wrap { trim: false }), diff_area);
+    f.render_widget(
+        Paragraph::new(diff_lines).wrap(Wrap { trim: false }),
+        diff_area,
+    );
     chunk_idx += 1;
 
     // Gitignore warnings
@@ -164,7 +177,9 @@ pub fn render(f: &mut Frame, dialog: &HandoffDialog) {
         let warn_count = dialog.gitignore_warnings.len();
         let mut warn_lines = vec![Line::from(Span::styled(
             format!("{} untracked file(s) won't transfer:", warn_count),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ))];
         for file in dialog.gitignore_warnings.iter().take(2) {
             warn_lines.push(Line::from(Span::styled(

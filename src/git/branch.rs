@@ -80,7 +80,11 @@ pub fn short_hash(repo_root: &Path, refname: &str) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git rev-parse --short {} failed: {}", refname, stderr.trim());
+        anyhow::bail!(
+            "git rev-parse --short {} failed: {}",
+            refname,
+            stderr.trim()
+        );
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())

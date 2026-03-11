@@ -37,23 +37,21 @@ pub fn load_forest_config() -> Result<ForestConfig> {
 
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let config: ForestConfig = toml::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let config: ForestConfig =
+        toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(config)
 }
 
 /// Save the forest config to ~/.config/cwt/forest.toml.
 pub fn save_forest_config(config: &ForestConfig) -> Result<()> {
-    let path = forest_config_path()
-        .context("unable to determine config directory")?;
+    let path = forest_config_path().context("unable to determine config directory")?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    let content = toml::to_string_pretty(config)
-        .context("failed to serialize forest config")?;
+    let content = toml::to_string_pretty(config).context("failed to serialize forest config")?;
     std::fs::write(&path, content)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())

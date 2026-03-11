@@ -70,8 +70,7 @@ impl StateStore {
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
 
-        let content = serde_json::to_string_pretty(state)
-            .context("failed to serialize state")?;
+        let content = serde_json::to_string_pretty(state).context("failed to serialize state")?;
         std::fs::write(&self.path, content)
             .with_context(|| format!("failed to write {}", self.path.display()))?;
         Ok(())
@@ -80,11 +79,13 @@ impl StateStore {
     /// Merge state with actual git worktree list to handle drift.
     /// Removes state entries for worktrees that no longer exist on disk,
     /// but does NOT add entries for worktrees not managed by cwt.
-    pub fn reconcile(&self, state: &mut State, git_worktrees: &[crate::git::commands::GitWorktree]) {
-        let git_paths: std::collections::HashSet<PathBuf> = git_worktrees
-            .iter()
-            .map(|w| w.path.clone())
-            .collect();
+    pub fn reconcile(
+        &self,
+        state: &mut State,
+        git_worktrees: &[crate::git::commands::GitWorktree],
+    ) {
+        let git_paths: std::collections::HashSet<PathBuf> =
+            git_worktrees.iter().map(|w| w.path.clone()).collect();
 
         // Remove entries whose paths no longer exist in git worktree list
         // Note: remote worktrees don't have local git paths, so always retain them

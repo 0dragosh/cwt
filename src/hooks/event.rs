@@ -91,7 +91,10 @@ mod tests {
         }"#;
         let event = HookEvent::from_json(json).unwrap();
         assert_eq!(event.worktree_name(), "feature-auth");
-        if let HookEvent::SessionStopped { session_id, data, .. } = &event {
+        if let HookEvent::SessionStopped {
+            session_id, data, ..
+        } = &event
+        {
             assert_eq!(session_id.as_deref(), Some("abc123"));
             assert_eq!(
                 data.as_ref().and_then(|d| d.exit_reason.as_deref()),

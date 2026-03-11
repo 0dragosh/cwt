@@ -125,8 +125,8 @@ pub fn find_containerfile(worktree_path: &Path) -> Option<std::path::PathBuf> {
 
 /// Parse a devcontainer.json file.
 pub fn parse_devcontainer(path: &Path) -> Result<DevContainerConfig> {
-    let content =
-        std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
 
     // Strip JSON comments (// and /* */) for compatibility
     let stripped = strip_json_comments(&content);
@@ -190,17 +190,12 @@ pub fn resolve_containerfile(
     config: &DevContainerConfig,
     devcontainer_path: &Path,
 ) -> Option<(String, std::path::PathBuf)> {
-    let devcontainer_dir = devcontainer_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let devcontainer_dir = devcontainer_path.parent().unwrap_or_else(|| Path::new("."));
 
     // Check build.dockerfile first
     if let Some(ref build) = config.build {
         if let Some(ref dockerfile) = build.dockerfile {
-            let context = build
-                .context
-                .as_deref()
-                .unwrap_or(".");
+            let context = build.context.as_deref().unwrap_or(".");
             let context_path = devcontainer_dir.join(context);
             return Some((dockerfile.clone(), context_path));
         }

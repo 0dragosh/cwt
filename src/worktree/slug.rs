@@ -2,20 +2,17 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 const ADJECTIVES: &[&str] = &[
-    "bold", "calm", "dark", "deft", "fair", "fast", "firm", "glad",
-    "gold", "keen", "kind", "lean", "loud", "neat", "pale", "pure",
-    "rare", "rich", "safe", "slim", "soft", "tall", "tidy", "warm",
-    "wild", "wise", "blue", "cool", "deep", "dry", "epic", "fine",
-    "free", "gray", "hale", "icy", "just", "lush", "mild", "nice",
+    "bold", "calm", "dark", "deft", "fair", "fast", "firm", "glad", "gold", "keen", "kind", "lean",
+    "loud", "neat", "pale", "pure", "rare", "rich", "safe", "slim", "soft", "tall", "tidy", "warm",
+    "wild", "wise", "blue", "cool", "deep", "dry", "epic", "fine", "free", "gray", "hale", "icy",
+    "just", "lush", "mild", "nice",
 ];
 
 const NOUNS: &[&str] = &[
-    "arch", "bark", "beam", "bird", "bolt", "cave", "claw", "cove",
-    "dawn", "dove", "dune", "echo", "edge", "elm", "fern", "fire",
-    "flux", "gale", "glen", "glow", "haze", "hill", "isle", "jade",
-    "lake", "leaf", "lynx", "mist", "moon", "moss", "nest", "node",
-    "oak", "opal", "palm", "peak", "pine", "pond", "rain", "reed",
-    "reef", "rock", "rose", "sage", "sand", "star", "stem", "tide",
+    "arch", "bark", "beam", "bird", "bolt", "cave", "claw", "cove", "dawn", "dove", "dune", "echo",
+    "edge", "elm", "fern", "fire", "flux", "gale", "glen", "glow", "haze", "hill", "isle", "jade",
+    "lake", "leaf", "lynx", "mist", "moon", "moss", "nest", "node", "oak", "opal", "palm", "peak",
+    "pine", "pond", "rain", "reed", "reef", "rock", "rose", "sage", "sand", "star", "stem", "tide",
     "vale", "vine", "wave", "well", "wind", "wolf", "wren", "yard",
 ];
 

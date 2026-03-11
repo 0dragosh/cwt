@@ -48,10 +48,7 @@ pub fn read_transcript_info(project_dir: &Path, msg_count: usize) -> Result<Tran
             // Accumulate usage from any message that has it
             accumulate_usage(&value, &mut usage);
 
-            let role = value
-                .get("role")
-                .and_then(|r| r.as_str())
-                .unwrap_or("");
+            let role = value.get("role").and_then(|r| r.as_str()).unwrap_or("");
 
             if role == "assistant" || role == "user" {
                 usage.message_count += 1;

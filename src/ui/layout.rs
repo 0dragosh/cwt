@@ -11,7 +11,7 @@ pub fn main_layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // top bar
+            Constraint::Length(1), // top bar
             Constraint::Min(3),    // main content
             Constraint::Length(1), // status bar
         ])
@@ -19,10 +19,7 @@ pub fn main_layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
 
     let panels = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(40),
-            Constraint::Percentage(60),
-        ])
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(outer[1]);
 
     (outer[0], panels[0], panels[1], outer[2])
@@ -34,7 +31,7 @@ pub fn forest_layout(area: Rect) -> (Rect, Rect, Rect, Rect, Rect) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // top bar
+            Constraint::Length(1), // top bar
             Constraint::Min(3),    // main content
             Constraint::Length(1), // status bar
         ])
@@ -43,9 +40,9 @@ pub fn forest_layout(area: Rect) -> (Rect, Rect, Rect, Rect, Rect) {
     let panels = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(20),  // repos
-            Constraint::Percentage(35),  // worktrees
-            Constraint::Percentage(45),  // inspector
+            Constraint::Percentage(20), // repos
+            Constraint::Percentage(35), // worktrees
+            Constraint::Percentage(45), // inspector
         ])
         .split(outer[1]);
 
@@ -141,9 +138,7 @@ pub fn render_top_bar_with_stats(
         if cost > 0.0 {
             spans.push(Span::styled(
                 format!(" ${:.2} ", cost),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Green),
+                Style::default().fg(Color::Black).bg(Color::Green),
             ));
         }
     }
@@ -174,15 +169,13 @@ pub fn render_forest_top_bar(
     total_waiting: usize,
     total_done: usize,
 ) {
-    let mut spans = vec![
-        Span::styled(
-            " cwt forest ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let mut spans = vec![Span::styled(
+        " cwt forest ",
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
+    )];
 
     if let Some(name) = selected_repo_name {
         spans.push(Span::raw(" "));
@@ -209,13 +202,14 @@ pub fn render_forest_top_bar(
     let summary = if summary_parts.is_empty() {
         format!("  {} repos, no active sessions", total_repos)
     } else {
-        format!("  {} across {} repos", summary_parts.join(", "), total_repos)
+        format!(
+            "  {} across {} repos",
+            summary_parts.join(", "),
+            total_repos
+        )
     };
 
-    spans.push(Span::styled(
-        summary,
-        Style::default().fg(Color::DarkGray),
-    ));
+    spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
 
     // Notification badges
     if total_waiting > 0 {

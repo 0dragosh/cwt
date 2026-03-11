@@ -102,7 +102,7 @@ pub fn render(
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
             Constraint::Length(meta_height),
-            Constraint::Length(1),  // separator
+            Constraint::Length(1), // separator
             Constraint::Min(5),    // diff stat / last message
         ])
         .split(inner);
@@ -140,7 +140,11 @@ pub fn render(
         ]),
         Line::from(vec![
             Span::styled("Created:   ", theme::help_key_style()),
-            Span::raw(format!("{} ({})", wt.created_at.format("%Y-%m-%d %H:%M"), age)),
+            Span::raw(format!(
+                "{} ({})",
+                wt.created_at.format("%Y-%m-%d %H:%M"),
+                age
+            )),
         ]),
         Line::from(vec![
             Span::styled("Path:      ", theme::help_key_style()),
@@ -157,7 +161,10 @@ pub fn render(
         };
         meta_lines.push(Line::from(vec![
             Span::styled("Remote:    ", theme::help_key_style()),
-            Span::styled(remote_detail, Style::default().fg(ratatui::style::Color::Magenta)),
+            Span::styled(
+                remote_detail,
+                Style::default().fg(ratatui::style::Color::Magenta),
+            ),
         ]));
     }
 
@@ -197,10 +204,7 @@ pub fn render(
     // Show PR info if available
     if let Some(pr_num) = wt.pr_number {
         let pr_label = wt.pr_status.label();
-        let pr_url_str = wt
-            .pr_url
-            .as_deref()
-            .unwrap_or("(no url)");
+        let pr_url_str = wt.pr_url.as_deref().unwrap_or("(no url)");
         let pr_style = match wt.pr_status {
             PrStatus::Draft => Style::default().fg(ratatui::style::Color::DarkGray),
             PrStatus::Open => Style::default().fg(ratatui::style::Color::Blue),
@@ -212,7 +216,10 @@ pub fn render(
         meta_lines.push(Line::from(vec![
             Span::styled("PR:        ", theme::help_key_style()),
             Span::styled(format!("#{} ({})", pr_num, pr_label), pr_style),
-            Span::styled(format!("  {}", pr_url_str), Style::default().fg(ratatui::style::Color::DarkGray)),
+            Span::styled(
+                format!("  {}", pr_url_str),
+                Style::default().fg(ratatui::style::Color::DarkGray),
+            ),
         ]));
     }
 
@@ -249,7 +256,10 @@ pub fn render(
         meta_lines.push(Line::from(vec![
             Span::styled("Container: ", theme::help_key_style()),
             Span::styled(ctr_label, ctr_style),
-            Span::styled(format!("  {}", ctr_detail), Style::default().fg(ratatui::style::Color::DarkGray)),
+            Span::styled(
+                format!("  {}", ctr_detail),
+                Style::default().fg(ratatui::style::Color::DarkGray),
+            ),
         ]));
     }
 
@@ -289,10 +299,8 @@ pub fn render(
     f.render_widget(meta, chunks[0]);
 
     // Separator
-    let sep = Paragraph::new(
-        "\u{2500}".repeat(chunks[1].width as usize)
-    )
-    .style(Style::default().fg(ratatui::style::Color::DarkGray));
+    let sep = Paragraph::new("\u{2500}".repeat(chunks[1].width as usize))
+        .style(Style::default().fg(ratatui::style::Color::DarkGray));
     f.render_widget(sep, chunks[1]);
 
     // Diff stat + last message section (scrollable)
@@ -350,7 +358,10 @@ fn format_status(wt: &Worktree) -> (String, Style) {
         WorktreeStatus::Idle => ("idle".to_string(), theme::status_idle_style()),
         WorktreeStatus::Running => {
             let duration = format_duration(age);
-            (format!("running ({})", duration), theme::status_running_style())
+            (
+                format!("running ({})", duration),
+                theme::status_running_style(),
+            )
         }
         WorktreeStatus::Waiting => (
             "waiting for input".to_string(),

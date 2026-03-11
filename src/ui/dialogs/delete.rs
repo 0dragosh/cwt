@@ -43,19 +43,17 @@ pub fn render(f: &mut Frame, dialog: &DeleteDialog) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // warning
-            Constraint::Min(5),   // diff preview
+            Constraint::Min(5),    // diff preview
             Constraint::Length(2), // buttons
         ])
         .margin(1)
         .split(inner);
 
     // Warning
-    let warning = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "A snapshot will be saved before deletion.",
-            theme::help_desc_style(),
-        ),
-    ]));
+    let warning = Paragraph::new(Line::from(vec![Span::styled(
+        "A snapshot will be saved before deletion.",
+        theme::help_desc_style(),
+    )]));
     f.render_widget(warning, chunks[0]);
 
     // Diff preview
@@ -64,7 +62,11 @@ pub fn render(f: &mut Frame, dialog: &DeleteDialog) {
         "Changes in worktree:",
         theme::help_key_style(),
     )));
-    for line in dialog.diff_preview.lines().take(chunks[1].height as usize - 1) {
+    for line in dialog
+        .diff_preview
+        .lines()
+        .take(chunks[1].height as usize - 1)
+    {
         let style = if line.starts_with('+') {
             theme::diff_add_style()
         } else if line.starts_with('-') {

@@ -183,8 +183,8 @@ pub fn execute(
             }
         }
         HandoffDirection::LocalToWorktree => {
-            let patch = git::diff::diff_full(local_path)
-                .context("failed to generate diff from local")?;
+            let patch =
+                git::diff::diff_full(local_path).context("failed to generate diff from local")?;
             if patch.trim().is_empty() {
                 anyhow::bail!("no changes to transfer");
             }

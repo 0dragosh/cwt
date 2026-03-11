@@ -11,7 +11,9 @@ pub const ICON_PERMANENT: &str = "π";
 
 /// Colors used throughout the TUI.
 pub fn title_style() -> Style {
-    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn selected_style() -> Style {
@@ -33,7 +35,9 @@ pub fn status_done_style() -> Style {
 }
 
 pub fn status_shipping_style() -> Style {
-    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn status_idle_style() -> Style {
