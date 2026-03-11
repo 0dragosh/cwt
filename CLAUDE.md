@@ -93,7 +93,9 @@ src/
 │   └── model.rs             # Config structs, TOML loading, defaults
 ├── hooks/
 │   ├── mod.rs
-│   └── claude.rs            # Generate .claude/settings.json hook entries
+│   ├── event.rs             # HookEvent enum + serde
+│   ├── socket.rs            # Unix domain socket listener (async)
+│   └── install.rs           # Generate hook scripts + patch settings.json
 └── state/
     ├── mod.rs
     └── store.rs             # JSON state persistence (.cwt/state.json)
@@ -224,11 +226,41 @@ show_diff_stat = true            # show file change counts in list
 
 ## Non-Goals for v0.1
 
-- Multi-repo / forest mode (single repo only)
-- Claude Code hooks auto-registration (manual for now)
-- Cloud/remote worktrees
-- Agent teams integration
-- PR creation from worktrees (use claude or gh directly)
+- Multi-repo / forest mode (single repo only — see ROADMAP.md for v0.3)
+- Agent teams / task orchestration (see ROADMAP.md for v0.4)
+- Cloud/remote worktrees (see ROADMAP.md for v0.7)
+- PR creation from worktrees (use claude or gh directly — see ROADMAP.md for v0.5)
+- Per-worktree containers (see ROADMAP.md for v0.6)
+
+## Hooks Architecture (Phase 5)
+
+cwt integrates with Claude Code via its hook system for real-time state sync.
+
+### Communication Path
+```
+Claude Code hook fires
+  → runs .cwt/hooks/<event>.sh
+    → reads JSON from stdin (Claude Code's event payload)
+    → transforms to cwt event format
+    → writes JSON to Unix socket /tmp/cwt-<repo-hash>.sock
+      → cwt TUI event loop reads from socket
+        → updates state + re-renders
+```
+
+### Hook Events cwt Listens For
+| Claude Code Hook | cwt Event | Effect |
+|---|---|---|
+| WorktreeCreate | WorktreeCreated | New worktree appears in list |
+| WorktreeRemove | WorktreeRemoved | Worktree removed from list |
+| Stop | SessionStopped | Status flips to ✓ done |
+| Notification | SessionNotification | Status flips to ⚠ waiting |
+| SubagentStop | SubagentStopped | Update subagent tracking |
+
+### Why Unix Sockets
+- Sub-second latency (vs polling files every 1s)
+- No temp file cleanup needed
+- Standard async I/O — fits naturally in tokio event loop
+- Socket path is deterministic per repo, so hooks know where to write
 
 ## Development Notes
 
