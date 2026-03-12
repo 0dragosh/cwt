@@ -18,6 +18,7 @@ mod worktree;
 use crate::worktree::Manager;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::process::Command as ProcessCommand;
 
 #[derive(Parser)]
@@ -202,17 +203,27 @@ fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
 
     let exe = std::env::current_exe().context("failed to locate cwt executable")?;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let cwd = std::env::current_dir().context("failed to get current directory for tmux bootstrap")?;
     let status = ProcessCommand::new("tmux")
-        .arg("new-session")
-        .arg("-A")
-        .arg("-s")
-        .arg("cwt")
-        .arg(exe)
-        .args(args)
+        .args(bootstrap_tmux_args(&cwd, &exe, &args))
         .status()
         .context("failed to launch cwt inside tmux")?;
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn bootstrap_tmux_args(cwd: &std::path::Path, exe: &std::path::Path, args: &[OsString]) -> Vec<OsString> {
+    let mut tmux_args = vec![
+        OsString::from("new-session"),
+        OsString::from("-A"),
+        OsString::from("-s"),
+        OsString::from("cwt"),
+        OsString::from("-c"),
+        cwd.as_os_str().to_os_string(),
+        exe.as_os_str().to_os_string(),
+    ];
+    tmux_args.extend(args.iter().cloned());
+    tmux_args
 }
 
 fn should_bootstrap_into_tmux(
@@ -341,14 +352,6 @@ fn startup_checks() -> Result<()> {
         eprintln!("warning: gh (GitHub CLI) not found on PATH");
         eprintln!("  Ship pipeline (P/S keys) requires gh.");
         eprintln!("  Install: https://cli.github.com/");
-        eprintln!();
-    }
-
-    // Check container runtime availability (info only)
-    if !crate::env::container::runtime_available() {
-        eprintln!("info: no container runtime found (podman/docker)");
-        eprintln!("  Container environments will fall back to bare setup scripts.");
-        eprintln!("  Install podman: https://podman.io/getting-started/installation");
         eprintln!();
     }
 
@@ -855,7 +858,9 @@ fn run_forest_tui() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_bootstrap_into_tmux, Commands};
+    use super::{bootstrap_tmux_args, should_bootstrap_into_tmux, Commands};
+    use std::ffi::OsString;
+    use std::path::Path;
 
     #[test]
     fn bootstraps_default_tui_entrypoint_outside_tmux() {
@@ -895,5 +900,28 @@ mod tests {
     fn skips_bootstrap_when_tmux_is_unavailable_or_already_active() {
         assert!(!should_bootstrap_into_tmux(None, true, true));
         assert!(!should_bootstrap_into_tmux(None, false, false));
+    }
+
+    #[test]
+    fn bootstrap_tmux_args_preserve_current_working_directory() {
+        let args = bootstrap_tmux_args(
+            Path::new("/repo/root"),
+            Path::new("/nix/store/bin/.cwt-wrapped"),
+            &[OsString::from("tui")],
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("new-session"),
+                OsString::from("-A"),
+                OsString::from("-s"),
+                OsString::from("cwt"),
+                OsString::from("-c"),
+                OsString::from("/repo/root"),
+                OsString::from("/nix/store/bin/.cwt-wrapped"),
+                OsString::from("tui"),
+            ]
+        );
     }
 }
