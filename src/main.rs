@@ -18,6 +18,7 @@ mod worktree;
 use crate::worktree::Manager;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::process::Command as ProcessCommand;
 
 #[derive(Parser)]
 #[command(
@@ -117,6 +118,7 @@ enum HooksAction {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    maybe_bootstrap_into_tmux(&cli)?;
 
     // Commands that don't require being in a git repo
     match &cli.command {
@@ -182,6 +184,47 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
+    let inside_tmux = crate::tmux::pane::is_inside_tmux();
+    let tmux_available = which::which("tmux").is_ok();
+
+    if !should_bootstrap_into_tmux(cli.command.as_ref(), inside_tmux, tmux_available) {
+        if interactive_entrypoint(cli.command.as_ref()) && !inside_tmux && !tmux_available {
+            eprintln!("error: cwt interactive mode requires tmux");
+            eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
+            std::process::exit(1);
+        }
+
+        return Ok(());
+    }
+
+    let exe = std::env::current_exe().context("failed to locate cwt executable")?;
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let status = ProcessCommand::new("tmux")
+        .arg("new-session")
+        .arg("-A")
+        .arg("-s")
+        .arg("cwt")
+        .arg(exe)
+        .args(args)
+        .status()
+        .context("failed to launch cwt inside tmux")?;
+
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+fn should_bootstrap_into_tmux(
+    command: Option<&Commands>,
+    inside_tmux: bool,
+    tmux_available: bool,
+) -> bool {
+    !inside_tmux && tmux_available && interactive_entrypoint(command)
+}
+
+fn interactive_entrypoint(command: Option<&Commands>) -> bool {
+    matches!(command, None | Some(Commands::Tui) | Some(Commands::Forest))
 }
 
 fn run_tui(manager: Manager) -> Result<()> {
@@ -808,4 +851,49 @@ fn run_forest_tui() -> Result<()> {
     let _ = forest::index::refresh_index(&forest_config);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_bootstrap_into_tmux, Commands};
+
+    #[test]
+    fn bootstraps_default_tui_entrypoint_outside_tmux() {
+        assert!(should_bootstrap_into_tmux(None, false, true));
+    }
+
+    #[test]
+    fn bootstraps_explicit_interactive_entrypoints_only() {
+        assert!(should_bootstrap_into_tmux(
+            Some(&Commands::Tui),
+            false,
+            true
+        ));
+        assert!(should_bootstrap_into_tmux(
+            Some(&Commands::Forest),
+            false,
+            true
+        ));
+        assert!(!should_bootstrap_into_tmux(
+            Some(&Commands::List),
+            false,
+            true
+        ));
+        assert!(!should_bootstrap_into_tmux(
+            Some(&Commands::Create {
+                name: None,
+                base: "main".to_string(),
+                carry: false,
+                remote: None,
+            }),
+            false,
+            true,
+        ));
+    }
+
+    #[test]
+    fn skips_bootstrap_when_tmux_is_unavailable_or_already_active() {
+        assert!(!should_bootstrap_into_tmux(None, true, true));
+        assert!(!should_bootstrap_into_tmux(None, false, false));
+    }
 }
