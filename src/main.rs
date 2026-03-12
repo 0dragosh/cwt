@@ -203,7 +203,8 @@ fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
 
     let exe = std::env::current_exe().context("failed to locate cwt executable")?;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let cwd = std::env::current_dir().context("failed to get current directory for tmux bootstrap")?;
+    let cwd =
+        std::env::current_dir().context("failed to get current directory for tmux bootstrap")?;
     let status = ProcessCommand::new("tmux")
         .args(bootstrap_tmux_args(&cwd, &exe, &args))
         .status()
@@ -212,7 +213,11 @@ fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
-fn bootstrap_tmux_args(cwd: &std::path::Path, exe: &std::path::Path, args: &[OsString]) -> Vec<OsString> {
+fn bootstrap_tmux_args(
+    cwd: &std::path::Path,
+    exe: &std::path::Path,
+    args: &[OsString],
+) -> Vec<OsString> {
     let mut tmux_args = vec![
         OsString::from("new-session"),
         OsString::from("-A"),
