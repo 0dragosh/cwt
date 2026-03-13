@@ -286,26 +286,26 @@ fn run_tui(manager: Manager) -> Result<()> {
 
         // Refresh session statuses periodically (every ~4 ticks = ~1 second)
         tick_count = tick_count.wrapping_add(1);
-        if tick_count % 4 == 0 {
+        if tick_count.is_multiple_of(4) {
             app.refresh();
             app.update_inspector();
             // Update dashboard stats less frequently (every ~4 seconds)
-            if tick_count % 16 == 0 {
+            if tick_count.is_multiple_of(16) {
                 app.update_dashboard();
                 // Update container statuses alongside dashboard
                 app.update_container_statuses();
             }
             // Update resource usage less frequently (every ~15 seconds = ~60 ticks)
-            if tick_count % 60 == 0 {
+            if tick_count.is_multiple_of(60) {
                 app.update_resource_usage();
             }
             // Poll PR/CI status even less frequently (every ~30 seconds = ~120 ticks)
-            if tick_count % 120 == 0 {
+            if tick_count.is_multiple_of(120) {
                 app.poll_ship_status();
             }
             // Poll remote host statuses infrequently (every ~60 seconds = ~240 ticks)
             // This is latency-aware: we batch remote checks to avoid polling on every tick
-            if tick_count % 240 == 0 {
+            if tick_count.is_multiple_of(240) {
                 app.poll_remote_statuses();
             }
         }
@@ -836,11 +836,11 @@ fn run_forest_tui() -> Result<()> {
 
         // Refresh session statuses periodically (every ~4 ticks = ~1 second)
         tick_count = tick_count.wrapping_add(1);
-        if tick_count % 4 == 0 {
+        if tick_count.is_multiple_of(4) {
             app.refresh();
             app.update_inspector();
             // Poll PR/CI status less frequently (every ~30 seconds = ~120 ticks)
-            if tick_count % 120 == 0 {
+            if tick_count.is_multiple_of(120) {
                 app.poll_ship_status();
             }
         }
