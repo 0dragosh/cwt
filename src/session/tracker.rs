@@ -3,14 +3,26 @@ use std::path::{Path, PathBuf};
 
 use crate::worktree::model::WorktreeStatus;
 
-/// Determine the session status for a worktree based on its tmux pane.
-/// Uses a single tmux query to avoid TOCTOU race between pane_exists and pane_current_command.
+/// Determine the session status for a worktree based on its tmux pane or background PID.
+/// Handles both tmux pane IDs (e.g., "%5") and headless PIDs (e.g., "pid:12345").
 pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
     match tmux_pane {
         None => WorktreeStatus::Idle,
+        Some(id) if id.starts_with("pid:") => {
+            // Headless background process — check if PID is still alive
+            match id.strip_prefix("pid:").and_then(|s| s.parse::<u32>().ok()) {
+                Some(pid) => {
+                    if is_pid_alive(pid) {
+                        WorktreeStatus::Running
+                    } else {
+                        WorktreeStatus::Done
+                    }
+                }
+                None => WorktreeStatus::Done,
+            }
+        }
         Some(pane_id) => {
-            // Single atomic query: if the pane exists, this returns the command;
-            // if it doesn't, the command fails.
+            // tmux pane — single atomic query to avoid TOCTOU race
             match crate::tmux::pane::pane_current_command(pane_id) {
                 Ok(cmd) => {
                     let cmd_lower = cmd.to_lowercase();
@@ -26,6 +38,30 @@ pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
             }
         }
     }
+}
+
+/// Check if a process with the given PID is still running.
+fn is_pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // kill(pid, 0) checks if the process exists without sending a signal.
+        // SAFETY: signal 0 does not affect the target process.
+        unsafe { libc_kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+#[cfg(unix)]
+unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
+    // Use direct syscall via libc-style FFI
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe { kill(pid, sig) }
 }
 
 /// Find Claude Code project directory for a given worktree path.
@@ -125,4 +161,51 @@ pub fn find_latest_session_id(project_dir: &Path) -> Result<Option<String>> {
         .first()
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_status_returns_idle_for_none() {
+        assert_eq!(check_status(None), WorktreeStatus::Idle);
+    }
+
+    #[test]
+    fn check_status_returns_running_for_live_pid() {
+        // Use our own PID — guaranteed to be alive
+        let own_pid = std::process::id();
+        let id = format!("pid:{}", own_pid);
+        assert_eq!(check_status(Some(&id)), WorktreeStatus::Running);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_dead_pid() {
+        // PID 2147483647 almost certainly doesn't exist
+        assert_eq!(check_status(Some("pid:2147483647")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_malformed_pid() {
+        assert_eq!(check_status(Some("pid:")), WorktreeStatus::Done);
+        assert_eq!(check_status(Some("pid:abc")), WorktreeStatus::Done);
+        assert_eq!(check_status(Some("pid:-1")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_invalid_tmux_pane() {
+        // A tmux pane ID that doesn't exist (no tmux server in tests)
+        assert_eq!(check_status(Some("%99999")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn is_pid_alive_detects_self() {
+        assert!(is_pid_alive(std::process::id()));
+    }
+
+    #[test]
+    fn is_pid_alive_rejects_nonexistent() {
+        assert!(!is_pid_alive(2_147_483_647));
+    }
 }

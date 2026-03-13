@@ -1098,9 +1098,20 @@ impl App {
             return Ok(());
         };
 
-        // If there's an existing pane, try to focus it
+        // If there's an existing pane or headless process, handle it
         if let Some(ref pane_id) = wt.tmux_pane {
-            if crate::tmux::pane::pane_exists(pane_id) {
+            if pane_id.starts_with("pid:") {
+                // Headless background process (from dispatch)
+                let status = session::tracker::check_status(Some(pane_id));
+                if status == WorktreeStatus::Running {
+                    self.status_message = format!(
+                        "'{}' is running headlessly — see .cwt/logs/{}.log",
+                        wt.name, wt.name
+                    );
+                    return Ok(());
+                }
+                // Process finished, fall through to launch/resume
+            } else if crate::tmux::pane::pane_exists(pane_id) {
                 match session::launcher::focus_session(pane_id) {
                     Ok(()) => {
                         self.status_message = format!("Focused session for '{}'", wt.name);
@@ -3419,9 +3430,18 @@ impl ForestApp {
             return Ok(());
         };
 
-        // If there's an existing pane, try to focus it
+        // If there's an existing pane or headless process, handle it
         if let Some(ref pane_id) = wt.tmux_pane {
-            if crate::tmux::pane::pane_exists(pane_id) {
+            if pane_id.starts_with("pid:") {
+                let status = session::tracker::check_status(Some(pane_id));
+                if status == WorktreeStatus::Running {
+                    self.status_message = format!(
+                        "'{}' is running headlessly — see .cwt/logs/{}.log",
+                        wt.name, wt.name
+                    );
+                    return Ok(());
+                }
+            } else if crate::tmux::pane::pane_exists(pane_id) {
                 if let Ok(()) = session::launcher::focus_session(pane_id) {
                     self.status_message = format!("Focused session for '{}'", wt.name);
                     return Ok(());
