@@ -149,8 +149,25 @@ impl Manager {
             worktree.path.clone()
         };
 
-        git::commands::worktree_remove(&self.repo_root, &wt_abs_path, true)
-            .with_context(|| format!("failed to remove worktree '{}'", name))?;
+        if let Err(e) = git::commands::worktree_remove(&self.repo_root, &wt_abs_path, true) {
+            // If git worktree remove fails but the directory still exists,
+            // try to clean it up ourselves
+            if wt_abs_path.exists() {
+                std::fs::remove_dir_all(&wt_abs_path).with_context(|| {
+                    format!(
+                        "failed to remove worktree directory '{}' after git worktree remove failed: {}",
+                        wt_abs_path.display(),
+                        e
+                    )
+                })?;
+                // Prune so git forgets any stale metadata
+                let _ = git::commands::worktree_prune(&self.repo_root);
+            }
+            // If the directory is already gone, the delete effectively succeeded — continue
+        } else if wt_abs_path.exists() {
+            // git worktree remove "succeeded" but directory still exists (partial cleanup)
+            let _ = std::fs::remove_dir_all(&wt_abs_path);
+        }
 
         // Delete branch
         let _ = git::commands::branch_delete(&self.repo_root, &worktree.branch, true);
@@ -314,6 +331,67 @@ impl Manager {
         }
 
         Ok(wt)
+    }
+
+    /// Scan the worktree directory for orphaned directories not tracked in state
+    /// that contain broken `.git` file pointers (left behind by partial deletions).
+    /// Removes any orphans found. Safe to call on startup.
+    pub fn audit_worktree_dir(&self) -> Result<Vec<String>> {
+        let state = self.load_state()?;
+        let wt_dir = self.repo_root.join(&self.config.worktree.dir);
+
+        if !wt_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let tracked_names: std::collections::HashSet<&str> =
+            state.worktrees.keys().map(|s| s.as_str()).collect();
+
+        let mut removed = Vec::new();
+
+        let entries = std::fs::read_dir(&wt_dir)
+            .with_context(|| format!("failed to read worktree dir {}", wt_dir.display()))?;
+
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+
+            // Skip directories that are tracked in state
+            if tracked_names.contains(dir_name.as_str()) {
+                continue;
+            }
+
+            // Check for a broken .git file pointer (worktree marker)
+            let dot_git = path.join(".git");
+            if dot_git.is_file() {
+                // Read the gitdir pointer (format: "gitdir: /path/to/.git/worktrees/<name>")
+                if let Ok(content) = std::fs::read_to_string(&dot_git) {
+                    let gitdir = content.trim().trim_start_matches("gitdir: ");
+                    if !std::path::Path::new(gitdir).exists() {
+                        // Broken pointer — this is an orphan
+                        if std::fs::remove_dir_all(&path).is_ok() {
+                            removed.push(dir_name);
+                        }
+                    }
+                }
+            }
+        }
+
+        if !removed.is_empty() {
+            // Prune git's worktree metadata to stay consistent
+            let _ = git::commands::worktree_prune(&self.repo_root);
+        }
+
+        Ok(removed)
     }
 
     /// Resolve the absolute path of a worktree.

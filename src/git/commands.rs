@@ -131,6 +131,12 @@ pub fn worktree_remove(repo_root: &Path, worktree_path: &Path, force: bool) -> R
     Ok(())
 }
 
+/// Prune stale worktree metadata (e.g. after manual directory removal).
+pub fn worktree_prune(repo_root: &Path) -> Result<()> {
+    git(repo_root, &["worktree", "prune"])?;
+    Ok(())
+}
+
 /// Delete a branch.
 pub fn branch_delete(repo_root: &Path, branch: &str, force: bool) -> Result<()> {
     let flag = if force { "-D" } else { "-d" };
