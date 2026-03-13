@@ -33,10 +33,10 @@ jobs:
         if: github.event_name == 'push'
 
       - name: cargo check
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
       - name: cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
   test:
     name: Tests
@@ -59,7 +59,7 @@ jobs:
           git config --global user.name "cwt-ci"
 
       - name: cargo test
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
   fmt:
     name: Format

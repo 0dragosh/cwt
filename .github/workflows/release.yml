@@ -56,7 +56,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Configure git for tests
         run: |
@@ -64,7 +64,7 @@ jobs:
           git config --global user.name "cwt-ci"
 
       - name: cargo test
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
   publish:
     name: Publish to crates.io
@@ -94,7 +94,7 @@ jobs:
           fi
 
       - name: cargo publish
-        run: cargo publish
+        run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
