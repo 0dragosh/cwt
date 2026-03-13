@@ -4,6 +4,8 @@ use ratatui::widgets::ListState;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::config::model::PermissionLevel;
+use crate::config::{self, ConfigMeta};
 use crate::env;
 use crate::git;
 use crate::hooks::event::HookEvent;
@@ -82,10 +84,14 @@ pub struct App {
     pub remote_statuses: Vec<remote::host::RemoteHostStatus>,
     /// Scroll offset for the help overlay.
     pub help_scroll: u16,
+    /// Runtime override for the permission level (None = use config default).
+    pub permission_override: Option<PermissionLevel>,
+    /// Metadata about the loaded config file.
+    pub config_meta: ConfigMeta,
 }
 
 impl App {
-    pub fn new(manager: Manager) -> Result<Self> {
+    pub fn new(manager: Manager, config_meta: ConfigMeta) -> Result<Self> {
         let worktrees = manager.list()?;
         let mut list_state = ListState::default();
         if !worktrees.is_empty() {
@@ -132,6 +138,8 @@ impl App {
             resource_warnings: Vec::new(),
             remote_statuses,
             help_scroll: 0,
+            permission_override: None,
+            config_meta,
         };
 
         app.update_inspector();
@@ -220,6 +228,12 @@ impl App {
             .iter()
             .filter(|wt| wt.status == WorktreeStatus::Done)
             .count();
+    }
+
+    /// Get the active permission level (runtime override or config default).
+    fn active_permission(&self) -> PermissionLevel {
+        self.permission_override
+            .unwrap_or(self.manager.config.session.default_permission)
     }
 
     /// Update aggregate dashboard stats across all sessions.
@@ -422,6 +436,7 @@ impl App {
             self.done_count,
             total_tokens,
             self.dashboard.total_cost_usd,
+            self.active_permission(),
         );
 
         // Render the worktree list
@@ -644,6 +659,41 @@ impl App {
             }
             KeyCode::Char('e') => {
                 self.open_shell()?;
+            }
+            KeyCode::Char('m') => {
+                let current = self.active_permission();
+                let next = current.cycle_next();
+                self.permission_override = Some(next);
+                self.status_message = format!(
+                    "Permission level: {} ({})",
+                    next.label(),
+                    next.short_label()
+                );
+            }
+            KeyCode::Char('M') => {
+                if self.config_meta.nix_managed {
+                    self.status_message =
+                        "Config is Nix-managed (read-only). Update your home-manager config instead.".to_string();
+                } else {
+                    let level = self.active_permission();
+                    self.manager.config.session.default_permission = level;
+                    let path =
+                        self.config_meta.source_path.clone().unwrap_or_else(|| {
+                            config::project_config_path(&self.manager.repo_root)
+                        });
+                    match config::save_config(&self.manager.config, &path) {
+                        Ok(()) => {
+                            self.status_message = format!(
+                                "Saved default permission '{}' to {}",
+                                level.label(),
+                                path.display()
+                            );
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to save config: {}", e);
+                        }
+                    }
+                }
             }
             KeyCode::Esc => {
                 // Clear filter if active
@@ -1077,12 +1127,27 @@ impl App {
                 })
         });
 
+        let permission = self.active_permission();
+        let permissions = &self.manager.config.session.permissions;
         let launch_result = if let Some(ref sid) = session_id {
             // Try to resume a previous session
-            session::launcher::resume_session(&wt, &wt_abs, sid, &self.manager.config.session)
+            session::launcher::resume_session(
+                &wt,
+                &wt_abs,
+                sid,
+                &self.manager.config.session,
+                permission,
+                permissions,
+            )
         } else {
             // Fresh launch
-            session::launcher::launch_session(&wt, &wt_abs, &self.manager.config.session)
+            session::launcher::launch_session(
+                &wt,
+                &wt_abs,
+                &self.manager.config.session,
+                permission,
+                permissions,
+            )
         };
 
         match launch_result {
@@ -1105,7 +1170,13 @@ impl App {
                     let _ = self.manager.save_state(&state);
                 }
 
-                self.status_message = format!("{} session for '{}' ({})", action, wt.name, pane_id);
+                self.status_message = format!(
+                    "{} session for '{}' [{}] ({})",
+                    action,
+                    wt.name,
+                    permission.label(),
+                    pane_id,
+                );
                 self.refresh();
                 self.update_inspector();
             }
@@ -1287,7 +1358,13 @@ impl App {
             if tasks.is_empty() {
                 self.status_message = "No tasks to dispatch".to_string();
             } else {
-                let results = orchestration::dispatch::dispatch_tasks(&self.manager, &tasks, &base);
+                let permission = self.active_permission();
+                let results = orchestration::dispatch::dispatch_tasks(
+                    &self.manager,
+                    &tasks,
+                    &base,
+                    permission,
+                );
                 let success_count = results.iter().filter(|r| r.error.is_none()).count();
                 let fail_count = results.iter().filter(|r| r.error.is_some()).count();
 
@@ -1837,12 +1914,16 @@ impl App {
         let remote_status = remote::session::check_remote_session_status(&host, &wt.name);
 
         if remote_status == remote::session::RemoteSessionStatus::NoSession {
+            let permission = self.active_permission();
+            let permissions = &self.manager.config.session.permissions;
             // Launch a new remote session
             match remote::session::launch_remote_session(
                 &host,
                 &repo_name,
                 &wt.name,
                 &self.manager.config.session.claude_args,
+                permission,
+                permissions,
             ) {
                 Ok(_tmux_session) => {
                     self.status_message = format!(
@@ -2242,6 +2323,8 @@ pub struct ForestApp {
     pub last_wt_list_area: Option<ratatui::layout::Rect>,
     /// Scroll offset for the help overlay.
     pub help_scroll: u16,
+    /// Runtime override for the permission level.
+    pub permission_override: Option<PermissionLevel>,
 }
 
 impl ForestApp {
@@ -2299,6 +2382,7 @@ impl ForestApp {
             last_repo_list_area: None,
             last_wt_list_area: None,
             help_scroll: 0,
+            permission_override: None,
         };
 
         app.update_aggregate_counts();
@@ -2360,6 +2444,17 @@ impl ForestApp {
             self.total_waiting += repo.stats.waiting_sessions;
             self.total_done += repo.stats.done_sessions;
         }
+    }
+
+    /// Get the active permission level for the selected repo.
+    fn active_permission(&self) -> PermissionLevel {
+        if let Some(ovr) = self.permission_override {
+            return ovr;
+        }
+        // Use the selected repo's config default, or fall back to Normal
+        self.selected_repo()
+            .map(|r| r.manager.config.session.default_permission)
+            .unwrap_or_default()
     }
 
     /// Refresh worktree lists and stats for all repos.
@@ -2791,6 +2886,46 @@ impl ForestApp {
             }
             KeyCode::Char('c') => {
                 self.open_ci_logs()?;
+            }
+            KeyCode::Char('m') => {
+                let current = self.active_permission();
+                let next = current.cycle_next();
+                self.permission_override = Some(next);
+                self.status_message = format!(
+                    "Permission level: {} ({})",
+                    next.label(),
+                    next.short_label()
+                );
+            }
+            KeyCode::Char('M') => {
+                // In forest mode, save to the selected repo's config
+                if let Some(repo) = self.selected_repo() {
+                    let repo_root = repo.manager.repo_root.clone();
+                    let path = config::project_config_path(&repo_root);
+                    if config::ConfigMeta::default().nix_managed {
+                        self.status_message =
+                            "Config is Nix-managed (read-only). Update your home-manager config instead.".to_string();
+                    } else {
+                        let level = self.active_permission();
+                        // Clone config and save
+                        let mut cfg = repo.manager.config.clone();
+                        cfg.session.default_permission = level;
+                        match config::save_config(&cfg, &path) {
+                            Ok(()) => {
+                                self.status_message = format!(
+                                    "Saved default permission '{}' to {}",
+                                    level.label(),
+                                    path.display()
+                                );
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save config: {}", e);
+                            }
+                        }
+                    }
+                } else {
+                    self.status_message = "No repo selected".to_string();
+                }
             }
             KeyCode::Esc => {
                 if !self.filter.is_empty() {
@@ -3310,10 +3445,25 @@ impl ForestApp {
                 })
         });
 
+        let permission = self.active_permission();
+        let permissions = &repo.manager.config.session.permissions;
         let launch_result = if let Some(ref sid) = session_id {
-            session::launcher::resume_session(&wt, &wt_abs, sid, &repo.manager.config.session)
+            session::launcher::resume_session(
+                &wt,
+                &wt_abs,
+                sid,
+                &repo.manager.config.session,
+                permission,
+                permissions,
+            )
         } else {
-            session::launcher::launch_session(&wt, &wt_abs, &repo.manager.config.session)
+            session::launcher::launch_session(
+                &wt,
+                &wt_abs,
+                &repo.manager.config.session,
+                permission,
+                permissions,
+            )
         };
 
         match launch_result {
@@ -3335,7 +3485,13 @@ impl ForestApp {
                     let _ = repo.manager.save_state(&state);
                 }
 
-                self.status_message = format!("{} session for '{}' ({})", action, wt.name, pane_id);
+                self.status_message = format!(
+                    "{} session for '{}' [{}] ({})",
+                    action,
+                    wt.name,
+                    permission.label(),
+                    pane_id,
+                );
                 self.refresh();
                 self.update_inspector();
             }
@@ -3471,7 +3627,13 @@ impl ForestApp {
             if tasks.is_empty() {
                 self.status_message = "No tasks to dispatch".to_string();
             } else if let Some(repo) = self.selected_repo() {
-                let results = orchestration::dispatch::dispatch_tasks(&repo.manager, &tasks, &base);
+                let permission = self.active_permission();
+                let results = orchestration::dispatch::dispatch_tasks(
+                    &repo.manager,
+                    &tasks,
+                    &base,
+                    permission,
+                );
                 let success_count = results.iter().filter(|r| r.error.is_none()).count();
                 let fail_count = results.iter().filter(|r| r.error.is_some()).count();
 

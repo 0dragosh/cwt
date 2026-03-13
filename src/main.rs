@@ -151,11 +151,11 @@ fn main() -> Result<()> {
         }
     };
 
-    let config = config::load_config(&repo_root)?;
+    let (config, config_meta) = config::load_config_with_meta(&repo_root)?;
     let manager = Manager::new(repo_root.clone(), config);
 
     match cli.command {
-        None | Some(Commands::Tui) => run_tui(manager)?,
+        None | Some(Commands::Tui) => run_tui(manager, config_meta)?,
         Some(Commands::List) => cmd_list(&manager)?,
         Some(Commands::Create {
             name,
@@ -246,7 +246,7 @@ fn interactive_entrypoint(command: Option<&Commands>) -> bool {
     matches!(command, None | Some(Commands::Tui) | Some(Commands::Forest))
 }
 
-fn run_tui(manager: Manager) -> Result<()> {
+fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     // Startup checks
     startup_checks()?;
 
@@ -265,7 +265,7 @@ fn run_tui(manager: Manager) -> Result<()> {
     let hook_listener = hooks::socket::HookSocketListener::start(&manager.repo_root).ok(); // Non-fatal if socket fails
 
     // Create app
-    let mut app = app::App::new(manager)?;
+    let mut app = app::App::new(manager, config_meta)?;
 
     // Refresh counter for periodic status updates
     let mut tick_count: u32 = 0;
@@ -618,7 +618,12 @@ fn cmd_dispatch(manager: &Manager, tasks: &[String], base: &str) -> Result<()> {
         base
     );
 
-    let results = orchestration::dispatch::dispatch_tasks(manager, tasks, base);
+    let results = orchestration::dispatch::dispatch_tasks(
+        manager,
+        tasks,
+        base,
+        manager.config.session.default_permission,
+    );
 
     let mut success = 0;
     let mut failed = 0;

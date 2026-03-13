@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::config::model::SessionConfig;
+use crate::config::model::{PermissionLevel, SessionConfig};
+use crate::session::launcher::inject_settings_override;
 use crate::tmux;
 use crate::worktree::model::{Worktree, WorktreeStatus};
 use crate::worktree::Manager;
@@ -21,15 +22,21 @@ pub fn dispatch_tasks(
     manager: &Manager,
     tasks: &[String],
     base_branch: &str,
+    permission: PermissionLevel,
 ) -> Vec<DispatchResult> {
     tasks
         .iter()
-        .map(|task| dispatch_one(manager, task, base_branch))
+        .map(|task| dispatch_one(manager, task, base_branch, permission))
         .collect()
 }
 
 /// Dispatch a single task: create worktree, launch Claude with --prompt.
-fn dispatch_one(manager: &Manager, task: &str, base_branch: &str) -> DispatchResult {
+fn dispatch_one(
+    manager: &Manager,
+    task: &str,
+    base_branch: &str,
+    permission: PermissionLevel,
+) -> DispatchResult {
     // Create worktree (auto-name)
     let wt = match manager.create(None, base_branch, false) {
         Ok(wt) => wt,
@@ -46,7 +53,8 @@ fn dispatch_one(manager: &Manager, task: &str, base_branch: &str) -> DispatchRes
     let wt_abs = manager.worktree_abs_path(&wt);
 
     // Launch Claude with --prompt flag
-    let pane_id = match launch_with_prompt(&wt, &wt_abs, task, &manager.config.session) {
+    let pane_id = match launch_with_prompt(&wt, &wt_abs, task, &manager.config.session, permission)
+    {
         Ok(id) => id,
         Err(e) => {
             return DispatchResult {
@@ -81,17 +89,25 @@ pub fn launch_with_prompt(
     worktree_abs_path: &Path,
     prompt: &str,
     config: &SessionConfig,
+    permission: PermissionLevel,
 ) -> Result<String> {
     if !tmux::pane::is_inside_tmux() {
         anyhow::bail!("cwt sessions require tmux -- please run cwt inside a tmux session");
     }
 
-    let mut cmd_parts = vec!["claude".to_string()];
+    if let Some(ref settings) = config.permissions.get(permission).settings_override {
+        inject_settings_override(worktree_abs_path, settings)?;
+    }
+
+    let mut cmd_parts = vec![config.command.clone()];
     // Add the prompt flag
     cmd_parts.push("-p".to_string());
     cmd_parts.push(shell_quote(prompt));
     for arg in &config.claude_args {
         cmd_parts.push(shell_quote(arg));
+    }
+    for arg in &config.permissions.get(permission).extra_args {
+        cmd_parts.push(arg.clone());
     }
     let command = cmd_parts.join(" ");
 

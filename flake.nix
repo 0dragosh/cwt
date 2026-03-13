@@ -92,5 +92,8 @@
       overlays.default = final: prev: {
         cwt = self.packages.${prev.system}.default;
       };
+
+      homeManagerModules.default = import ./nix/module.nix;
+      homeManagerModules.cwt = import ./nix/module.nix;
     };
 }

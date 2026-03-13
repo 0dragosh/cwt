@@ -84,8 +84,17 @@ Add to a flake-based NixOS or home-manager configuration:
 
   # Option 2: reference the package directly
   environment.systemPackages = [ cwt.packages.${system}.default ];
+
+  # Option 3: home-manager module (generates ~/.config/cwt/config.toml)
+  imports = [ cwt.homeManagerModules.default ];
+  programs.cwt = {
+    enable = true;
+    settings.session.default_permission = "elevated";
+  };
 }
 ```
+
+See [docs/nix.md](docs/nix.md) for full home-manager module documentation.
 
 ### From source
 
@@ -213,6 +222,36 @@ cwt status                             # CLI summary across repos
   `.devcontainer/devcontainer.json`
 - Port management: auto-assign non-conflicting ports per worktree
 
+### Permission Levels
+
+cwt supports three permission tiers for Claude Code sessions, giving you
+fine-grained control over how much autonomy Claude gets:
+
+| Level | Badge | Behavior |
+| ----- | ----- | -------- |
+| **Normal** | `N` (gray) | Plain `claude` — asks for permission on each tool use (default) |
+| **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — Claude runs autonomously within a sandbox |
+| **Elevated Unsandboxed** | `U!` (red) | Appends `--dangerously-skip-permissions` — full autonomy, no sandbox |
+
+- Press `m` to cycle through permission levels at runtime
+- Press `M` to save the current level as the default in your config
+- The active level is shown as a badge in the top bar
+- Each worktree gets its own `.claude/settings.local.json`, so there are no
+  concurrency conflicts between sessions
+
+The elevated (sandboxed) mode writes these settings before launch:
+
+```json
+{
+  "permissions": { "allow": [], "deny": [] },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false
+  }
+}
+```
+
 ### Remote Worktrees
 
 - SSH-based remote host management
@@ -249,6 +288,13 @@ cwt status                             # CLI summary across repos
 | `P` | Create PR (push + `gh pr create`)   | Worktree selected |
 | `S` | Ship it (push + PR + mark shipping) | Worktree selected |
 | `c` | Open CI logs in browser             | Worktree selected |
+
+### Permissions
+
+| Key | Action                                       | Context |
+| --- | -------------------------------------------- | ------- |
+| `m` | Cycle permission level (Normal/Elevated/Unsandboxed) | Global  |
+| `M` | Save current permission level as default     | Global  |
 
 ### Navigation
 
@@ -306,6 +352,20 @@ timeout_secs = 120               # setup script timeout
 [session]
 auto_launch = true               # launch Claude on worktree create
 claude_args = []                 # extra args for claude invocation
+default_permission = "normal"    # "normal", "elevated", or "elevated_unsandboxed"
+
+# Permission-level overrides (optional — sensible defaults built in)
+# [session.permissions.normal]
+# extra_args = []
+#
+# [session.permissions.elevated]
+# extra_args = []
+# [session.permissions.elevated.settings_override.sandbox]
+# enabled = true
+# autoAllowBashIfSandboxed = true
+#
+# [session.permissions.elevated_unsandboxed]
+# extra_args = ["--dangerously-skip-permissions"]
 
 [handoff]
 method = "patch"                 # "patch" or "cherry-pick"
