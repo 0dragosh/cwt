@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
   push:
     tags: ["v*"]
 
@@ -12,14 +17,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  resolve-tag:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Compute effective tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
   ci:
     name: CI Gate
+    needs: resolve-tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
@@ -44,13 +68,14 @@ jobs:
 
   publish:
     name: Publish to crates.io
-    needs: ci
+    needs: [resolve-tag, ci]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
@@ -58,8 +83,10 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Verify tag matches Cargo.toml version
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/v}"
+          tag="${TAG#v}"
           cargo_version="$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version')"
           if [ "$tag" != "$cargo_version" ]; then
             echo "::error::Tag v$tag does not match Cargo.toml version $cargo_version"
@@ -73,17 +100,20 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: [ci, publish]
+    needs: [resolve-tag, ci, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
           fetch-depth: 0
 
       - name: Generate changelog
         id: changelog
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           # Find the previous tag
           prev_tag="$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')"
@@ -91,7 +121,7 @@ jobs:
             # First release — log everything
             changelog="$(git log --oneline --no-decorate)"
           else
-            changelog="$(git log --oneline --no-decorate "${prev_tag}..HEAD")"
+            changelog="$(git log --oneline --no-decorate "${prev_tag}..${TAG}")"
           fi
           # Write to file to avoid delimiter issues
           echo "$changelog" > /tmp/changelog.txt
@@ -99,8 +129,8 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
-            --title "$tag" \
+          gh release create "$TAG" \
+            --title "$TAG" \
             --notes-file /tmp/changelog.txt
