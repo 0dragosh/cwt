@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::config::model::{PermissionLevel, SessionConfig};
 use crate::session::launcher::inject_settings_override;
-use crate::tmux;
 use crate::worktree::model::{Worktree, WorktreeStatus};
 use crate::worktree::Manager;
 
@@ -83,7 +83,10 @@ fn dispatch_one(
     }
 }
 
-/// Launch a Claude Code session with an initial prompt using -p flag.
+/// Launch a Claude Code session with an initial prompt as a headless background process.
+/// Uses `-p` (print mode) which doesn't need a terminal, so we avoid creating
+/// tmux panes that clutter the session. Output is logged to `.cwt/logs/<name>.log`.
+/// Returns a synthetic identifier for tracking (the PID as a string).
 pub fn launch_with_prompt(
     worktree: &Worktree,
     worktree_abs_path: &Path,
@@ -91,38 +94,52 @@ pub fn launch_with_prompt(
     config: &SessionConfig,
     permission: PermissionLevel,
 ) -> Result<String> {
-    if !tmux::pane::is_inside_tmux() {
-        anyhow::bail!("cwt sessions require tmux -- please run cwt inside a tmux session");
-    }
+    // Ensure log directory exists
+    let logs_dir = worktree_abs_path
+        .ancestors()
+        .find(|p| p.join(".cwt").is_dir())
+        .unwrap_or(worktree_abs_path)
+        .join(".cwt/logs");
+    std::fs::create_dir_all(&logs_dir)
+        .with_context(|| format!("failed to create log dir {}", logs_dir.display()))?;
 
+    // Inject permission-level settings override if configured
     if let Some(ref settings) = config.permissions.get(permission).settings_override {
         inject_settings_override(worktree_abs_path, settings)?;
     }
 
-    let mut cmd_parts = vec![config.command.clone()];
-    // Add the prompt flag
-    cmd_parts.push("-p".to_string());
-    cmd_parts.push(shell_quote(prompt));
+    let log_file_path = logs_dir.join(format!("{}.log", worktree.name));
+    let log_file = std::fs::File::create(&log_file_path)
+        .with_context(|| format!("failed to create log file {}", log_file_path.display()))?;
+    let err_file = log_file
+        .try_clone()
+        .context("failed to clone log file handle")?;
+
+    let mut cmd = Command::new(&config.command);
+    cmd.arg("-p").arg(prompt);
     for arg in &config.claude_args {
-        cmd_parts.push(shell_quote(arg));
+        cmd.arg(arg);
     }
     for arg in &config.permissions.get(permission).extra_args {
-        cmd_parts.push(arg.clone());
+        cmd.arg(arg);
     }
-    let command = cmd_parts.join(" ");
 
-    let pane_title = format!("cwt:{}", worktree.name);
+    cmd.current_dir(worktree_abs_path)
+        .stdin(Stdio::null())
+        .stdout(log_file)
+        .stderr(err_file);
 
-    let pane_id = tmux::pane::create_pane(worktree_abs_path, &command, &pane_title)
-        .with_context(|| format!("failed to launch session for '{}'", worktree.name))?;
+    // Detach from the parent's process group so the child survives if cwt exits
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
 
-    Ok(pane_id)
-}
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("failed to spawn claude for '{}'", worktree.name))?;
 
-/// Shell-quote a string for safe embedding in a tmux command.
-/// Single-quoting prevents expansion of $, `, !, etc.
-/// Newlines are replaced with spaces to prevent command splitting.
-fn shell_quote(s: &str) -> String {
-    let sanitized = s.replace(['\n', '\r'], " ");
-    format!("'{}'", sanitized.replace('\'', "'\\''"))
+    let pid = child.id();
+    Ok(format!("pid:{}", pid))
 }
