@@ -1,8 +1,8 @@
-# cwt -- Claude Worktree Manager
+# cwt — Claude Worktree Manager
 
-A TUI worktree manager for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), built in Rust. Manage git worktrees purpose-built for parallel Claude Code sessions, all from a single terminal interface running inside tmux.
+A terminal UI for running parallel [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in isolated git worktrees. Built in Rust, runs inside tmux.
 
-The worktree is the first-class primitive -- sessions attach to worktrees, not the other way around.
+> **The worktree is the first-class primitive** — sessions attach to worktrees, not the other way around.
 
 ```
 Worktree (unit of work)
@@ -10,127 +10,45 @@ Worktree (unit of work)
   |-- Session (Claude Code instance, 0 or 1 active)
   |-- Lifecycle: ephemeral | permanent
   |-- State: idle | running | waiting | done | shipping
-  |-- Optional: container, port allocation, remote host
 ```
 
-## Features
+## Why cwt?
 
-### Worktree Management
+When using Claude Code on a real codebase, you often want to run multiple tasks in parallel — fix a bug, add a feature, write tests — without them stepping on each other. Git worktrees give you cheap, isolated copies of your repo. cwt manages the lifecycle of those worktrees and the Claude sessions inside them, all from a single TUI.
 
-- **Create** worktrees with auto-generated slug names or explicit names, from any base branch
-- **Two-tier lifecycle**: ephemeral (auto-GC'd) and permanent (never auto-deleted)
-- **Promote** ephemeral worktrees to permanent with a single keypress
-- **Snapshots**: full diff saved as `.patch` before every deletion -- no work is ever lost
-- **Restore** previously deleted worktrees from their snapshots
-- **Garbage collection**: prune ephemeral worktrees beyond the configured limit, oldest first, skipping those with running sessions, uncommitted changes, or unpushed commits
-- **Setup scripts**: automatically run a script (e.g., `npm install`, `cargo build`) after worktree creation
-
-### TUI Interface
-
-- **Two-panel layout**: worktree list (grouped by lifecycle) + inspector (details, diff stat, session info, PR/CI status, container status, resource usage)
-- **Fuzzy filter**: `/` to search/filter worktrees by name
-- **Help overlay**: `?` for a full keybinding reference
-- **Mouse support**: click to select worktrees, scroll to navigate
-- **Scrollable inspector**: `j`/`k` when inspector is focused
-- **Status bar**: notification badges for waiting/done sessions, aggregate dashboard stats
-- **Theme**: dark-terminal-friendly color scheme
-
-### tmux Session Management
-
-- **Launch** Claude Code in a tmux pane attached to any worktree
-- **Resume** previous sessions using Claude Code's `--resume` flag
-- **Focus** an existing session pane with a single keypress
-- **Open shell** in any worktree directory via a tmux pane
-- Sessions survive TUI exit -- closing cwt does not kill running sessions
-
-### Handoff
-
-- **Bidirectional** patch transfer between your main working directory and any worktree
-- Direction picker: worktree-to-local or local-to-worktree
-- Diff preview before applying
-- Gitignore gap warnings for untracked files that won't transfer
-
-### Hooks (Real-Time Claude Code Integration)
-
-- **Unix domain socket** listener at `/tmp/cwt-<repo-hash>.sock` for sub-second event delivery
-- Hook events: `WorktreeCreated`, `WorktreeRemoved`, `SessionStopped`, `SessionNotification`, `SubagentStopped`
-- `cwt hooks install` patches `.claude/settings.json` and writes hook scripts to `.cwt/hooks/`
-- Worktrees created by Claude Code outside cwt appear in the list within one second
-
-### Forest Mode (Multi-Repo)
-
-- Register multiple git repos with `cwt add-repo <path>`
-- **Three-panel TUI** in forest mode: repos | worktrees | inspector
-- **Global dashboard**: aggregate session counts across all repos
-- `cwt status` for a one-line CLI summary of all repos and active sessions
-- Per-repo state with a global index at `~/.config/cwt/index.json`
-
-### Agent Orchestration
-
-- **Dispatch** multiple tasks in parallel: `cwt dispatch "task 1" "task 2" ...` creates a worktree per task and launches Claude with `--prompt`
-- **Import issues** from GitHub (`cwt import --github`) or Linear (`cwt import --linear`) -- creates worktrees and sessions per issue
-- **Broadcast** a prompt to all running sessions simultaneously via tmux `send-keys`
-- **Aggregate dashboard**: token usage, cost totals, message counts, per-session progress
-
-### Ship Pipeline
-
-- **Create PR** (`P`): commit staged changes, push branch, create PR via `gh pr create` with auto-generated body from session transcript
-- **Ship it** (`S`): one-keypress macro -- push, create PR, mark worktree as "shipping"
-- **PR status tracking**: draft / open / approved / merged / closed, polled periodically
-- **CI status**: GitHub Actions pass/fail/pending via `gh run list`
-- **Open CI logs** (`c`): opens the latest CI run in your browser
-- **Auto-cleanup**: on merge, worktree is flagged for deletion
-
-### Per-Worktree Containers
-
-- **Podman or Docker** support (prefers Podman for rootless/NixOS compatibility)
-- Auto-detect `Containerfile`, `Dockerfile`, or `.devcontainer/devcontainer.json`
-- Worktree mounted as `/workspace` volume inside the container
-- **Port management**: auto-assign non-conflicting ports per worktree (`CWT_PORT`, `CWT_APP_PORT`, `CWT_DB_PORT` env vars)
-- **Resource tracking**: disk usage, container CPU/memory, with configurable warning thresholds
-- Falls back to bare setup scripts when no container runtime is available
-
-### Remote Worktrees
-
-- **SSH-based** remote host management with configurable connection details
-- Create worktrees on remote machines: `cwt create --remote <host> <name>`
-- Sessions run in remote tmux via SSH, focusable from local TUI
-- **Cross-machine handoff**: generate patch locally, apply on remote (or vice versa)
-- **Latency-aware polling**: remote statuses checked infrequently to avoid network overhead
-- Network status indicators: connected (with latency), disconnected, unknown
-- Remote worktrees displayed with `[host]` label in the TUI
+- **Spin up a worktree in seconds** — auto-named, auto-branched, ready to go
+- **Never lose work** — every deletion saves a `.patch` snapshot first
+- **Stay organized** — ephemeral worktrees auto-clean; permanent ones stick around
+- **See everything at once** — two-panel TUI with live session status, diff stats, and transcript previews
+- **Scale up** — dispatch tasks in bulk, import GitHub issues, broadcast prompts across sessions
 
 ## Requirements
 
 - **git** (with worktree support)
-- **tmux** (for session management)
+- **tmux** (session management)
 - [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) CLI (`claude`)
 
 Optional:
 
-- **gh** ([GitHub CLI](https://cli.github.com/)) -- for ship pipeline (PR creation, CI status)
-- **podman** or **docker** -- for per-worktree containers
-- **ssh** -- for remote worktrees
+- **gh** ([GitHub CLI](https://cli.github.com/)) — for PR creation and CI status
+- **podman** or **docker** — for per-worktree containers
+- **ssh** — for remote worktrees
 
 ## Installation
 
-### Using Nix (recommended)
+### Nix (recommended)
 
-cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64).
-
-**Run directly without installing:**
+cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64). The Nix package automatically wraps the binary so `git` and `tmux` are always on `PATH`.
 
 ```sh
+# Run without installing
 nix run github:0dragosh/cwt
-```
 
-**Install to your profile:**
-
-```sh
+# Install to your profile
 nix profile install github:0dragosh/cwt
 ```
 
-**Add to a flake-based NixOS or home-manager configuration:**
+Add to a flake-based NixOS or home-manager configuration:
 
 ```nix
 # flake.nix
@@ -139,48 +57,47 @@ nix profile install github:0dragosh/cwt
 
   # Option 1: use the overlay
   nixpkgs.overlays = [ cwt.overlays.default ];
-  # then add `pkgs.cwt` to your packages
+  # then add pkgs.cwt to your packages
 
   # Option 2: reference the package directly
   environment.systemPackages = [ cwt.packages.${system}.default ];
 }
 ```
 
-**Enter the development shell:**
-
-```sh
-nix develop
-```
-
-This gives you a full Rust toolchain with `rust-analyzer`, `cargo-watch`, `cargo-edit`, plus `git` and `tmux`.
-
-### From source with Cargo
+### From source
 
 ```sh
 git clone https://github.com/0dragosh/cwt.git
 cd cwt
 cargo build --release
-# Binary is at target/release/cwt
+# Binary at target/release/cwt — add it to your PATH
 ```
 
-Make sure `git` and `tmux` are available on your `PATH`. The Nix package wraps the binary to include these automatically.
+Make sure `git` and `tmux` are on your `PATH`.
 
 ## Quick Start
 
 ```sh
-# Navigate to a git repo and start a tmux session
+# 1. Navigate to any git repo and start tmux
 cd ~/my-project
 tmux
 
-# Launch the TUI
+# 2. Launch the TUI
 cwt
 
-# Or use CLI commands directly:
+# 3. Press 'n' to create a worktree (Enter for auto-generated name)
+# 4. Press 's' to launch a Claude session in it
+# 5. Press 'Tab' to switch between the worktree list and inspector panels
+```
+
+Or use CLI commands directly:
+
+```sh
 cwt create my-feature --base main     # Create a worktree
 cwt list                               # List all worktrees
-cwt delete my-feature                  # Delete (with snapshot)
+cwt delete my-feature                  # Delete (saves a snapshot first)
 
-# Dispatch parallel tasks
+# Dispatch parallel tasks — one worktree + session per task
 cwt dispatch "implement auth" "add tests" "update docs"
 
 # Import GitHub issues as worktrees
@@ -190,8 +107,71 @@ cwt import --github --limit 5
 cwt add-repo ~/code/project-a
 cwt add-repo ~/code/project-b
 cwt forest                             # Launch forest TUI
-cwt status                             # CLI summary
+cwt status                             # CLI summary across repos
 ```
+
+## Features
+
+### Worktree Management
+- **Create** with auto-generated slug names or explicit names, from any base branch
+- **Two-tier lifecycle**: ephemeral (auto-GC'd) and permanent (never auto-deleted)
+- **Promote** ephemeral worktrees to permanent with a single keypress
+- **Snapshots**: full diff saved as `.patch` before every deletion
+- **Restore** previously deleted worktrees from their snapshots
+- **Garbage collection**: prune old ephemeral worktrees, skipping those with running sessions, uncommitted changes, or unpushed commits
+- **Setup scripts**: automatically run a script (e.g., `npm install`) after worktree creation
+
+### TUI Interface
+- **Two-panel layout**: worktree list (grouped by lifecycle) + inspector (details, diff stat, session info)
+- **Fuzzy filter**: `/` to search/filter worktrees by name
+- **Help overlay**: `?` for a full keybinding reference
+- **Mouse support**: click to select, scroll to navigate
+- **Status bar**: notification badges for waiting/done sessions
+
+### tmux Session Management
+- **Launch** Claude Code in a tmux pane attached to any worktree
+- **Resume** previous sessions using Claude Code's `--resume` flag
+- **Focus** an existing session pane with a single keypress
+- **Open shell** in any worktree directory via a tmux pane
+- Sessions survive TUI exit — closing cwt does not kill running sessions
+
+### Handoff
+- **Bidirectional** patch transfer between your main working directory and any worktree
+- Direction picker: worktree-to-local or local-to-worktree
+- Diff preview before applying
+- Gitignore gap warnings for untracked files that won't transfer
+
+### Hooks (Real-Time Claude Code Integration)
+- **Unix domain socket** listener for sub-second event delivery
+- Worktrees created by Claude Code outside cwt appear in the list within one second
+- `cwt hooks install` patches `.claude/settings.json` and writes hook scripts to `.cwt/hooks/`
+
+### Forest Mode (Multi-Repo)
+- Register multiple repos with `cwt add-repo <path>`
+- Three-panel TUI: repos | worktrees | inspector
+- Aggregate session counts across all repos
+- `cwt status` for a one-line CLI summary
+
+### Agent Orchestration
+- **Dispatch** multiple tasks in parallel: `cwt dispatch "task 1" "task 2" ...`
+- **Import issues** from GitHub or Linear — creates worktrees and sessions per issue
+- **Broadcast** a prompt to all running sessions simultaneously
+
+### Ship Pipeline
+- **Create PR** from a worktree with auto-generated body from session transcript
+- **CI status tracking**: pass/fail/pending via `gh run list`
+- **Ship it**: one-keypress macro to push, create PR, and mark as shipping
+
+### Per-Worktree Containers
+- Podman or Docker support (prefers Podman for rootless compatibility)
+- Auto-detect `Containerfile`, `Dockerfile`, or `.devcontainer/devcontainer.json`
+- Port management: auto-assign non-conflicting ports per worktree
+
+### Remote Worktrees
+- SSH-based remote host management
+- Create and manage worktrees on remote machines
+- Cross-machine handoff via patches
+- Latency-aware polling with network status indicators
 
 ## Keybindings
 
@@ -237,7 +217,6 @@ cwt status                             # CLI summary
 | `?` | Toggle help overlay | Global |
 | `q` | Quit | Global |
 | `Ctrl+C` | Force quit | Global |
-| Mouse click | Select worktree | Worktree list |
 
 ## CLI Commands
 
@@ -247,12 +226,12 @@ cwt status                             # CLI summary
 | `cwt tui` | Launch the TUI (explicit) |
 | `cwt list` | List all managed worktrees |
 | `cwt create [name] --base <branch>` | Create a new worktree |
-| `cwt create [name] --remote <host>` | Create a worktree on a remote host |
+| `cwt create [name] --remote <host>` | Create on a remote host |
 | `cwt delete <name>` | Delete a worktree (saves snapshot) |
 | `cwt promote <name>` | Promote ephemeral to permanent |
 | `cwt gc [--execute]` | Preview/run garbage collection |
 | `cwt hooks install` | Install Claude Code hook scripts |
-| `cwt hooks uninstall` | Remove Claude Code hook scripts |
+| `cwt hooks uninstall` | Remove hook scripts |
 | `cwt hooks status` | Show hook and socket status |
 | `cwt dispatch "task" ...` | Dispatch parallel tasks |
 | `cwt import --github [--limit N]` | Import GitHub issues as worktrees |
@@ -276,7 +255,7 @@ script = ""                      # path to setup script (relative to repo root)
 timeout_secs = 120               # setup script timeout
 
 [session]
-auto_launch = true               # launch claude on worktree create
+auto_launch = true               # launch Claude on worktree create
 claude_args = []                 # extra args for claude invocation
 
 [handoff]
@@ -290,62 +269,58 @@ show_diff_stat = true            # show file change counts in list
 [container]
 enabled = false                  # enable container support
 runtime = "auto"                 # "podman", "docker", or "auto"
-containerfile = ""               # path to Containerfile (overrides auto-detect)
 auto_ports = true                # auto-assign ports per worktree
-app_base_port = 3000             # starting port for app allocations
-db_base_port = 5432              # starting port for db allocations
-port_names = ["app"]             # port names to auto-allocate
-disk_warning_bytes = 1073741824  # 1 GiB disk usage warning
-track_resources = false          # periodic resource tracking
 
 # Remote hosts (one [[remote]] block per host)
 [[remote]]
-name = "fenrir"
-host = "fenrir.local"
-user = "d"
+name = "build-server"
+host = "build.example.com"
+user = "dev"
 worktree_dir = "/data/worktrees"
-port = 22
-identity_file = ""
 ```
-
-Forest mode configuration (`~/.config/cwt/forest.toml`):
-
-```toml
-[[repo]]
-path = "/home/user/code/project-a"
-name = "project-a"
-
-[[repo]]
-path = "/home/user/code/project-b"
-name = "project-b"
-```
-
-## State
-
-cwt persists worktree metadata in `.cwt/state.json` per project. Snapshots are saved as `.patch` files under `.cwt/snapshots/`. The state file tracks worktree names, branches, lifecycle, session IDs, tmux panes, PR/CI status, container info, port allocations, and remote host assignments.
 
 ## Architecture
 
 ```
 src/
-  main.rs                   # CLI parsing, TUI bootstrap, startup checks
-  app.rs                    # App state, event loop, keybinding dispatch
-  config/                   # TOML config loading (project + global)
-  state/                    # JSON state persistence (.cwt/state.json)
-  git/                      # Git worktree, branch, and diff operations
-  worktree/                 # Worktree CRUD, handoff, snapshots, setup, slug gen
-  session/                  # Claude session launcher, tracker, transcript parser
-  tmux/                     # tmux pane create/focus/kill/send-keys
-  hooks/                    # Unix socket listener, hook events, script installer
-  forest/                   # Multi-repo config, global index
-  orchestration/            # Task dispatch, issue import, broadcast, dashboard
-  ship/                     # PR creation, CI status, ship pipeline
-  env/                      # Containers (Podman/Docker), devcontainer, ports, resources
-  remote/                   # SSH host management, remote sessions, cross-machine sync
-  ui/                       # ratatui widgets: layout, worktree list, inspector,
-                            #   repo list, status bar, theme, help, dialogs
+  main.rs          # CLI parsing, TUI bootstrap, startup checks
+  app.rs           # App state, event loop, keybinding dispatch, rendering
+  config/          # TOML config loading (project + global fallback)
+  state/           # JSON state persistence (.cwt/state.json)
+  git/             # Git worktree, branch, and diff operations
+  worktree/        # Worktree CRUD, handoff, snapshots, setup, slug generation
+  session/         # Claude session launcher, tracker, transcript parser
+  tmux/            # tmux pane create/focus/kill/send-keys
+  hooks/           # Unix socket listener, hook events, script installer
+  forest/          # Multi-repo config, global index
+  orchestration/   # Task dispatch, issue import, broadcast, dashboard
+  ship/            # PR creation, CI status, ship pipeline
+  env/             # Containers (Podman/Docker), devcontainer, ports, resources
+  remote/          # SSH host management, remote sessions, cross-machine sync
+  ui/              # ratatui widgets: layout, list, inspector, dialogs, theme
 ```
+
+## Troubleshooting
+
+**cwt says "tmux is required"**
+cwt must run inside a tmux session. Start one with `tmux` before launching `cwt`.
+
+**Worktrees don't appear after Claude Code creates them**
+Run `cwt hooks install` to set up the real-time hook integration. Without hooks, cwt discovers worktrees on periodic refresh (every few seconds).
+
+**`gh` commands fail (PR creation, CI status)**
+Make sure the [GitHub CLI](https://cli.github.com/) is installed and authenticated (`gh auth login`).
+
+**Sessions show "idle" even though Claude is running**
+cwt detects session status by parsing `~/.claude/projects/` transcripts. If the path hash doesn't match, status won't update. Restarting cwt re-scans the project directory.
+
+**GC skipped a worktree I expected it to prune**
+GC never prunes worktrees with running sessions, uncommitted changes, or unpushed commits. Check `cwt list` for details.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code conventions, and how to submit changes.
 
 ## License
 
-MIT
+[MIT](LICENSE)

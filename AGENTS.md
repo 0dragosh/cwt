@@ -1,6 +1,6 @@
 # cwt Subagent Definitions
 
-These are custom subagent prompts for building cwt with Claude Code. Save each as a `.md` file in `.claude/agents/`.
+Custom subagent prompts for building cwt with Claude Code. Save each as a `.md` file in `.claude/agents/`.
 
 ---
 
@@ -23,11 +23,10 @@ allowedTools:
 You are implementing a phase of the cwt (Claude Worktree Manager) project.
 
 Read CLAUDE.md for the full project spec and architecture.
-Read PLAN.md for the phased build plan.
 
 When implementing a phase:
-1. Read the phase requirements from PLAN.md
-2. Follow the file-by-file implementation order listed at the bottom of PLAN.md
+1. Read the phase requirements
+2. Follow the architecture in CLAUDE.md for file placement
 3. After creating each file, run `cargo check` to verify it compiles
 4. After completing all files in the phase, run `cargo clippy` and fix any warnings
 5. Run `cargo test` if tests exist
@@ -39,7 +38,6 @@ Key rules:
 - Use anyhow::Result for all fallible functions
 - Use thiserror for error enums in library-style modules
 - Keep the TUI event loop non-blocking (async with tokio)
-- Every public function needs a doc comment
 ```
 
 ---
@@ -72,7 +70,7 @@ When building a widget:
 
 Style guidelines:
 - Use Unicode box-drawing characters from ratatui's Block widget
-- Status icons: ● (active/running), ✓ (done), ⏸ (idle), ⚠ (waiting for input)
+- Status icons: running, done, idle, waiting for input
 - Keep text concise — assume 80-column minimum terminal width
 - Right-align secondary info (timestamps, sizes)
 ```

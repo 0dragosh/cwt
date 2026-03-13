@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Claude Worktree Manager — TUI for managing git worktrees with Claude Code"
 license = "MIT"
+repository = "https://github.com/0dragosh/cwt"
+homepage = "https://github.com/0dragosh/cwt"
+keywords = ["git", "worktree", "tui", "claude", "tmux"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 ratatui = "0.30"

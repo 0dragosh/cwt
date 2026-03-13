@@ -1,6 +1,6 @@
 # cwt — Claude Worktree Manager
 
-A TUI worktree manager for Claude Code, modeled after the Codex desktop app's worktree system. The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
+A TUI worktree manager for Claude Code. The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
 
 ## Project Overview
 
@@ -10,10 +10,11 @@ A TUI worktree manager for Claude Code, modeled after the Codex desktop app's wo
 
 ```
 Worktree (unit of work)
-  ├── Branch (auto-created or user-specified)
-  ├── Session (claude code instance, 0 or 1 active)
-  ├── Lifecycle: ephemeral | permanent
-  └── State: idle | running | waiting | done
+  |-- Branch (auto-created or user-specified)
+  |-- Session (Claude Code instance, 0 or 1 active)
+  |-- Lifecycle: ephemeral | permanent
+  |-- State: idle | running | waiting | done | shipping
+  |-- Optional: container, port allocation, remote host
 ```
 
 ### Two-Tier Worktree Model
@@ -24,81 +25,95 @@ Worktree (unit of work)
 ## Tech Stack
 
 - **Language**: Rust (2021 edition, stable)
-- **TUI**: ratatui + crossterm
+- **TUI**: ratatui 0.30 + crossterm 0.28
 - **Terminal multiplexing**: tmux (required dependency)
+- **Async runtime**: tokio (full features)
 - **State**: JSON file per project at `.cwt/state.json`
 - **Config**: TOML at `.cwt/config.toml` (project) and `~/.config/cwt/config.toml` (global)
-
-## Key Dependencies
-
-```toml
-[dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-clap = { version = "4", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4"] }
-rand = "0.8"                    # for slug generation
-dirs = "5"                      # XDG paths
-which = "7"                     # find tmux, claude, git
-anyhow = "1"
-thiserror = "2"
-```
 
 ## Architecture
 
 ```
 src/
-├── main.rs                  # Entry point, CLI parsing, app bootstrap
-├── app.rs                   # Top-level App state + update loop
-├── ui/
-│   ├── mod.rs
-│   ├── layout.rs            # Two-panel layout (worktree list + inspector)
-│   ├── worktree_list.rs     # Left panel: worktree list with status icons
-│   ├── inspector.rs         # Right panel: details, diff, session info
-│   ├── dialogs/
-│   │   ├── mod.rs
-│   │   ├── create.rs        # New worktree dialog (name, branch, options)
-│   │   ├── handoff.rs       # Handoff confirmation with diff preview
-│   │   ├── delete.rs        # Delete confirmation
-│   │   └── gc.rs            # GC preview (what will be pruned)
-│   ├── branch_picker.rs     # Fuzzy branch selector
-│   └── theme.rs             # Colors, symbols, borders
-├── worktree/
-│   ├── mod.rs
-│   ├── manager.rs           # CRUD: create, delete, promote, list, gc
-│   ├── model.rs             # Worktree struct, lifecycle enum, serialization
-│   ├── snapshot.rs          # Save diff-as-patch before delete
-│   ├── handoff.rs           # Bidirectional local ↔ worktree transfer
-│   └── setup.rs             # Run setup scripts on worktree creation
-├── session/
-│   ├── mod.rs
-│   ├── launcher.rs          # Launch claude in tmux pane
-│   ├── tracker.rs           # Parse ~/.claude/ for session status
-│   └── transcript.rs        # Read last N messages from session transcript
-├── git/
-│   ├── mod.rs
-│   ├── commands.rs          # git worktree add/remove/list, branch ops
-│   ├── diff.rs              # git diff --stat, git diff for inspector
-│   └── branch.rs            # List branches, current branch, remote tracking
-├── tmux/
-│   ├── mod.rs
-│   └── pane.rs              # Create/focus/kill tmux panes for sessions
-├── config/
-│   ├── mod.rs
-│   └── model.rs             # Config structs, TOML loading, defaults
-├── hooks/
-│   ├── mod.rs
-│   ├── event.rs             # HookEvent enum + serde
-│   ├── socket.rs            # Unix domain socket listener (async)
-│   └── install.rs           # Generate hook scripts + patch settings.json
-└── state/
-    ├── mod.rs
-    └── store.rs             # JSON state persistence (.cwt/state.json)
+  main.rs                   # Entry point, CLI parsing, tmux bootstrap
+  app.rs                    # App state, event loop, keybinding dispatch, rendering
+  config/
+    mod.rs                  # Config loading with project -> global -> default fallback
+    model.rs                # Config structs, TOML deserialization, defaults
+  state/
+    mod.rs
+    store.rs                # JSON state persistence (.cwt/state.json)
+  git/
+    mod.rs
+    commands.rs             # git worktree add/remove/list, branch ops
+    branch.rs               # List branches, current branch, remote tracking
+    diff.rs                 # git diff --stat parsing
+  worktree/
+    mod.rs
+    manager.rs              # CRUD: create, delete, promote, list, gc
+    model.rs                # Worktree struct, Lifecycle enum, serialization
+    handoff.rs              # Bidirectional local <-> worktree patch transfer
+    snapshot.rs             # Save diff-as-patch before delete
+    setup.rs                # Run setup scripts on worktree creation
+    slug.rs                 # Auto-generate slug names (adj-noun-hex)
+  session/
+    mod.rs
+    launcher.rs             # Launch claude in tmux pane
+    tracker.rs              # Parse ~/.claude/ for session status
+    transcript.rs           # Read last N messages from session JSONL
+  tmux/
+    mod.rs
+    pane.rs                 # Create/focus/kill tmux panes, session detection
+  hooks/
+    mod.rs
+    event.rs                # HookEvent enum + JSON serde
+    socket.rs               # Unix domain socket listener (async, tokio)
+    install.rs              # Generate hook scripts + patch settings.json
+  forest/
+    mod.rs
+    config.rs               # Forest config at ~/.config/cwt/forest.toml
+    index.rs                # Index of all repos + stats aggregation
+  orchestration/
+    mod.rs
+    dispatch.rs             # Parallel task dispatch into worktrees
+    import.rs               # GitHub/Linear issue importing
+    broadcast.rs            # Broadcast messages to all sessions via tmux send-keys
+    dashboard.rs            # Aggregate stats (tokens, cost, message counts)
+  ship/
+    mod.rs
+    pipeline.rs             # Pipeline stages
+    pr.rs                   # GitHub PR creation via gh CLI
+    ci.rs                   # CI status polling via gh run list
+  env/
+    mod.rs
+    container.rs            # Dev container introspection & setup (Podman/Docker)
+    devcontainer.rs         # .devcontainer.json parsing
+    ports.rs                # Port allocation manager
+    resources.rs            # CPU/memory/disk monitoring
+  remote/
+    mod.rs
+    host.rs                 # RemoteHost config & SSH operations
+    session.rs              # Remote session tracking
+    sync.rs                 # Repo sync to remote hosts
+  ui/
+    mod.rs
+    layout.rs               # Two-panel layout, top bar, status
+    worktree_list.rs        # Left panel: worktree list with status icons
+    inspector.rs            # Right panel: details, diff, session info
+    repo_list.rs            # Forest mode: repo picker
+    status_bar.rs           # Top bar with notification badges
+    help.rs                 # Help overlay
+    theme.rs                # Colors, symbols, borders
+    dialogs/
+      mod.rs
+      create.rs             # New worktree dialog (name, branch, options)
+      delete.rs             # Delete confirmation
+      handoff.rs            # Handoff direction + diff preview
+      gc.rs                 # GC preview modal
+      restore.rs            # Restore from snapshot
+      dispatch.rs           # Task dispatch dialog
+      broadcast.rs          # Broadcast message dialog
+      ship.rs               # PR/ship dialog
 ```
 
 ## Key Behaviors
@@ -110,18 +125,18 @@ src/
 3. Dialog: pick base branch (fuzzy finder over local + remote branches)
 4. Dialog: carry local changes? (only shown if working dir is dirty)
 5. `git worktree add .claude/worktrees/<name> -b wt/<name> <base>`
-6. If carry changes: `git stash` → apply in worktree → pop stash in local
+6. If carry changes: `git stash` -> apply in worktree -> pop stash in local
 7. If setup script configured: run it in the worktree directory
 8. New worktree is auto-selected in the list
-9. If `auto_launch` enabled: session starts automatically via `session.command`
+9. If `auto_launch` enabled: session starts automatically
 10. Register in `.cwt/state.json` as ephemeral
 
-### Handoff Flow (Worktree → Local)
+### Handoff Flow
 1. User selects worktree, presses `h`
 2. Show diff preview of worktree changes vs its base
 3. Confirm direction: "Apply worktree changes to local" or "Send local changes to worktree"
-4. For WT→Local: generate patch with `git diff` in worktree, apply with `git apply` in local
-5. For Local→WT: same in reverse
+4. For WT->Local: generate patch with `git diff` in worktree, apply with `git apply` in local
+5. For Local->WT: same in reverse
 6. Warn if `.gitignore`d files exist that won't transfer
 
 ### Snapshot Before Delete
@@ -152,20 +167,50 @@ src/
 - Snapshot remaining, then delete oldest until under `max_ephemeral`
 - Show preview of what will be pruned before executing
 
+### Hooks (Claude Code Integration)
+
+cwt integrates with Claude Code via its hook system for real-time state sync.
+
+#### Communication Path
+```
+Claude Code hook fires
+  -> runs .cwt/hooks/<event>.sh
+    -> reads JSON from stdin (Claude Code's event payload)
+    -> transforms to cwt event format
+    -> writes JSON to Unix socket /tmp/cwt-<repo-hash>.sock
+      -> cwt TUI event loop reads from socket
+        -> updates state + re-renders
+```
+
+#### Hook Events
+| Claude Code Hook | cwt Event | Effect |
+|---|---|---|
+| WorktreeCreate | WorktreeCreated | New worktree appears in list |
+| WorktreeRemove | WorktreeRemoved | Worktree removed from list |
+| Stop | SessionStopped | Status flips to done |
+| Notification | SessionNotification | Status flips to waiting |
+| SubagentStop | SubagentStopped | Update subagent tracking |
+
+Unix sockets are used instead of file polling for sub-second latency and clean async I/O integration with tokio.
+
 ## Keybindings
 
 | Key | Action | Context |
 |-----|--------|---------|
 | `n` | New worktree (Enter to quick-create) | Global |
-| `Enter` | Launch/resume Claude session | Worktree selected |
 | `s` | Launch/resume Claude session | Worktree selected |
-| `e` | Open shell in worktree (tmux tab) | Worktree selected |
+| `Enter` | Open shell in worktree (tmux pane) | Worktree selected |
 | `h` | Handoff | Worktree selected |
 | `p` | Promote to permanent | Ephemeral selected |
 | `d` | Delete (with snapshot) | Worktree selected |
 | `g` | Run GC | Global |
 | `r` | Restore from snapshot | Global |
-| `j/k` or `↓/↑` | Navigate list | Worktree list |
+| `t` | Dispatch tasks | Global |
+| `b` | Broadcast prompt | Global |
+| `P` | Create PR | Worktree selected |
+| `S` | Ship it | Worktree selected |
+| `c` | Open CI logs | Worktree selected |
+| `j/k` or arrows | Navigate list / scroll inspector | Global |
 | `Tab` | Switch panel focus | Global |
 | `/` | Filter/search worktrees | Worktree list |
 | `?` | Help overlay | Global |
@@ -185,8 +230,7 @@ script = ""                      # path to setup script (relative to repo root)
 timeout_secs = 120               # setup script timeout
 
 [session]
-auto_launch = true               # launch claude on worktree create + Enter
-command = "claude"               # command to run (e.g. custom wrapper script)
+auto_launch = true               # launch claude on worktree create
 claude_args = []                 # extra args for claude invocation
 
 [handoff]
@@ -194,8 +238,19 @@ method = "patch"                 # "patch" or "cherry-pick"
 warn_gitignore = true            # warn about .gitignore gaps
 
 [ui]
-theme = "default"                # future: theme support
+theme = "default"
 show_diff_stat = true            # show file change counts in list
+
+[container]
+enabled = false                  # enable container support
+runtime = "auto"                 # "podman", "docker", or "auto"
+auto_ports = true                # auto-assign ports per worktree
+
+[[remote]]
+name = "build-server"
+host = "build.example.com"
+user = "dev"
+worktree_dir = "/data/worktrees"
 ```
 
 ## State Format
@@ -220,7 +275,7 @@ show_diff_stat = true            # show file change counts in list
   "snapshots": [
     {
       "name": "bugfix-old",
-      "patch_file": "~/.cwt/snapshots/bugfix-old-20260311.patch",
+      "patch_file": ".cwt/snapshots/bugfix-old-20260311.patch",
       "base_commit": "e5f6g7h8",
       "deleted_at": "2026-03-11T09:00:00Z"
     }
@@ -228,49 +283,12 @@ show_diff_stat = true            # show file change counts in list
 }
 ```
 
-## Non-Goals for v0.1
-
-- Multi-repo / forest mode (single repo only — see ROADMAP.md for v0.3)
-- Agent teams / task orchestration (see ROADMAP.md for v0.4)
-- Cloud/remote worktrees (see ROADMAP.md for v0.7)
-- PR creation from worktrees (use claude or gh directly — see ROADMAP.md for v0.5)
-- Per-worktree containers (see ROADMAP.md for v0.6)
-
-## Hooks Architecture (Phase 5)
-
-cwt integrates with Claude Code via its hook system for real-time state sync.
-
-### Communication Path
-```
-Claude Code hook fires
-  → runs .cwt/hooks/<event>.sh
-    → reads JSON from stdin (Claude Code's event payload)
-    → transforms to cwt event format
-    → writes JSON to Unix socket /tmp/cwt-<repo-hash>.sock
-      → cwt TUI event loop reads from socket
-        → updates state + re-renders
-```
-
-### Hook Events cwt Listens For
-| Claude Code Hook | cwt Event | Effect |
-|---|---|---|
-| WorktreeCreate | WorktreeCreated | New worktree appears in list |
-| WorktreeRemove | WorktreeRemoved | Worktree removed from list |
-| Stop | SessionStopped | Status flips to ✓ done |
-| Notification | SessionNotification | Status flips to ⚠ waiting |
-| SubagentStop | SubagentStopped | Update subagent tracking |
-
-### Why Unix Sockets
-- Sub-second latency (vs polling files every 1s)
-- No temp file cleanup needed
-- Standard async I/O — fits naturally in tokio event loop
-- Socket path is deterministic per repo, so hooks know where to write
-
 ## Development Notes
 
 - Always run `cargo clippy` before committing
 - Use `anyhow` for application errors, `thiserror` for library-style errors in the core modules
 - All git operations go through `src/git/commands.rs` — never shell out to git directly from other modules
 - All tmux operations go through `src/tmux/pane.rs`
-- The TUI event loop is async (tokio) so we can poll for session status changes without blocking the UI
+- The TUI event loop is async (tokio) — keep it non-blocking
 - Test git operations against a temp repo created in tests (use `tempfile` crate)
+- Integration tests are in `tests/integration.rs`
