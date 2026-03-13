@@ -160,8 +160,8 @@ impl RemoteHost {
     /// Run a git command in the remote worktree directory.
     pub fn git_remote(&self, repo_name: &str, args: &[&str]) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
-        let git_args = args.join(" ");
-        let command = format!("cd {} && git {}", ssh_shell_quote(&repo_path), git_args);
+        let git_args: Vec<String> = args.iter().map(|a| ssh_shell_quote(a)).collect();
+        let command = format!("cd {} && git {}", ssh_shell_quote(&repo_path), git_args.join(" "));
         self.ssh_exec(&command)
     }
 

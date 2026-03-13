@@ -59,11 +59,11 @@ fn build_claude_command(
 
     if let Some(sid) = resume_session_id {
         cmd_parts.push("--resume".to_string());
-        cmd_parts.push(sid.to_string());
+        cmd_parts.push(shell_quote(sid));
     }
 
     for arg in &config.claude_args {
-        cmd_parts.push(arg.clone());
+        cmd_parts.push(shell_quote(arg));
     }
 
     let claude_cmd = cmd_parts.join(" ");
@@ -92,9 +92,15 @@ fn build_container_exec_command(
     format!(
         "{} exec -it -w /workspace {} sh -c '{}'",
         runtime.cmd(),
-        container_id,
+        shell_quote(container_id),
         inner_command.replace('\'', "'\\''"),
     )
+}
+
+/// Shell-quote a string for safe embedding in a command.
+/// Wraps in single quotes and escapes any embedded single quotes.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Focus an existing session pane.

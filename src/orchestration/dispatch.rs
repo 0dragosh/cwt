@@ -91,7 +91,7 @@ pub fn launch_with_prompt(
     cmd_parts.push("-p".to_string());
     cmd_parts.push(shell_quote(prompt));
     for arg in &config.claude_args {
-        cmd_parts.push(arg.clone());
+        cmd_parts.push(shell_quote(arg));
     }
     let command = cmd_parts.join(" ");
 
