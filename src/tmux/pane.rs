@@ -13,7 +13,7 @@ pub struct PaneInfo {
 
 /// Check if we're currently running inside a tmux session.
 pub fn is_inside_tmux() -> bool {
-    std::env::var("TMUX").is_ok()
+    inside_tmux_with_probe(std::env::var_os("TMUX").as_deref(), probe_tmux_client)
 }
 
 /// Get the current tmux session name.
@@ -140,6 +140,21 @@ fn tmux(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn inside_tmux_with_probe(
+    tmux_env: Option<&std::ffi::OsStr>,
+    probe_tmux_client: impl FnOnce() -> bool,
+) -> bool {
+    matches!(tmux_env, Some(value) if !value.is_empty()) && probe_tmux_client()
+}
+
+fn probe_tmux_client() -> bool {
+    Command::new("tmux")
+        .args(["display-message", "-p", "#{session_id}"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 /// Simple shell escaping for paths.
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -153,6 +168,13 @@ fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+    use std::sync::{Mutex, OnceLock};
+
+    fn tmux_env_lock() -> &'static Mutex<()> {
+        static TMUX_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        TMUX_ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_shell_escape_simple_path() {
@@ -185,6 +207,36 @@ mod tests {
     fn test_build_shell_cmd_with_args() {
         let cmd = build_shell_cmd("/tmp/wt", "claude --resume sess-123");
         assert_eq!(cmd, "cd '/tmp/wt' && claude --resume sess-123");
+    }
+
+    #[test]
+    fn stale_tmux_env_does_not_count_as_running_inside_tmux() {
+        assert!(!inside_tmux_with_probe(
+            Some(OsStr::new("/tmp/tmux-501/default,123,0")),
+            || false,
+        ));
+    }
+
+    #[test]
+    fn live_tmux_env_requires_a_healthy_tmux_probe() {
+        assert!(inside_tmux_with_probe(
+            Some(OsStr::new("/tmp/tmux-501/default,123,0")),
+            || true,
+        ));
+    }
+
+    #[test]
+    fn is_inside_tmux_rejects_a_stale_tmux_environment() {
+        let _guard = tmux_env_lock().lock().unwrap();
+        let original_tmux = std::env::var_os("TMUX");
+
+        std::env::set_var("TMUX", "/tmp/tmux-501/definitely-stale,123,0");
+        assert!(!is_inside_tmux());
+
+        match original_tmux {
+            Some(value) => std::env::set_var("TMUX", value),
+            None => std::env::remove_var("TMUX"),
+        }
     }
 
     /// Verify create_pane uses `new-window` (tabs) not `split-window` (splits).

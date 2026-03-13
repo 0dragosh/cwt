@@ -1,6 +1,6 @@
 # cwt — Claude Worktree Manager
 
-A terminal UI for running parallel [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in isolated git worktrees. Built in Rust, runs inside tmux.
+A terminal UI for running parallel [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in isolated git worktrees. Built in Rust, uses tmux for all interactive session management, and requires tmux to be installed.
 
 > **The worktree is the first-class primitive** — sessions attach to worktrees, not the other way around.
 
@@ -25,7 +25,7 @@ When using Claude Code on a real codebase, you often want to run multiple tasks 
 ## Requirements
 
 - **git** (with worktree support)
-- **tmux** (session management)
+- **tmux** (mandatory; interactive mode and session management depend on it)
 - [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) CLI (`claude`)
 
 Optional:
@@ -42,9 +42,11 @@ Optional:
 cargo install cwt
 ```
 
+`cargo install` does not install tmux for you. Install `tmux` separately and make sure it is on your `PATH` before running `cwt`.
+
 ### Nix (recommended)
 
-cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64). The Nix package automatically wraps the binary so `git` and `tmux` are always on `PATH`.
+cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64). The Nix package includes `tmux` and `git` as runtime dependencies and wraps the binary so they are always on `PATH`.
 
 ```sh
 # Run without installing
@@ -79,16 +81,17 @@ cargo build --release
 # Binary at target/release/cwt — add it to your PATH
 ```
 
-Make sure `git` and `tmux` are on your `PATH`.
+Make sure `git` is on your `PATH`, and make sure `tmux` is installed and on your `PATH`. `cwt` cannot run its interactive workflows without tmux.
 
 ## Quick Start
 
-```sh
-# 1. Navigate to any git repo and start tmux
-cd ~/my-project
-tmux
+`tmux` is a hard dependency. If you launch `cwt` from a regular interactive shell, it will bootstrap into tmux automatically when possible, but tmux still must be installed locally.
 
-# 2. Launch the TUI
+```sh
+# 1. Navigate to any git repo
+cd ~/my-project
+
+# 2. Launch the TUI (cwt will bootstrap into tmux if needed)
 cwt
 
 # 3. Press 'n' to create a worktree (Enter for auto-generated name)
@@ -309,7 +312,7 @@ src/
 ## Troubleshooting
 
 **cwt says "tmux is required"**
-cwt must run inside a tmux session. Start one with `tmux` before launching `cwt`.
+`tmux` is a mandatory runtime dependency. Install it first, then run `cwt` again. If you launch `cwt` from a normal interactive shell, it will bootstrap into tmux automatically when possible.
 
 **Worktrees don't appear after Claude Code creates them**
 Run `cwt hooks install` to set up the real-time hook integration. Without hooks, cwt discovers worktrees on periodic refresh (every few seconds).
