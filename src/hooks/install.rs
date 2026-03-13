@@ -1,7 +1,33 @@
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::hooks::socket;
+
+const MANAGED_HOOKS: [(&str, &str); 3] = [
+    ("Stop", "cwt-stop.sh"),
+    ("Notification", "cwt-notification.sh"),
+    ("SubagentStop", "cwt-subagent_stop.sh"),
+];
+
+fn managed_hook_paths(hooks_dir: &Path) -> Vec<(String, String)> {
+    MANAGED_HOOKS
+        .iter()
+        .map(|(event, script)| {
+            (
+                (*event).to_string(),
+                hooks_dir.join(script).to_string_lossy().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn managed_hook_path_set(hooks_dir: &Path) -> HashSet<String> {
+    managed_hook_paths(hooks_dir)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect()
+}
 
 /// Install cwt hook scripts and patch .claude/settings.json.
 pub fn install_hooks(repo_root: &Path) -> Result<()> {
@@ -36,14 +62,11 @@ pub fn uninstall_hooks(repo_root: &Path) -> Result<()> {
 
     // Remove hook scripts
     if hooks_dir.exists() {
-        for entry in std::fs::read_dir(&hooks_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path
-                .file_name()
-                .is_some_and(|n| n.to_string_lossy().starts_with("cwt-"))
-            {
-                std::fs::remove_file(&path)?;
+        for (_, script_name) in MANAGED_HOOKS {
+            let script_path = hooks_dir.join(script_name);
+            if script_path.exists() {
+                std::fs::remove_file(&script_path)
+                    .with_context(|| format!("failed to remove {}", script_path.display()))?;
             }
         }
     }
@@ -159,28 +182,18 @@ fn patch_claude_settings(repo_root: &Path, hooks_dir: &Path) -> Result<()> {
         .as_object_mut()
         .context("hooks field is not an object")?;
 
-    // Register each hook event type
-    let hook_entries = [
-        ("Stop", "cwt-stop.sh"),
-        ("Notification", "cwt-notification.sh"),
-        ("SubagentStop", "cwt-subagent_stop.sh"),
-    ];
-
-    for (event_name, script_name) in &hook_entries {
-        let script_path = hooks_dir.join(script_name);
-        let script_str = script_path.to_string_lossy().to_string();
-
+    for (event_name, script_str) in managed_hook_paths(hooks_dir) {
         let event_hooks = hooks_map
-            .entry(event_name.to_string())
+            .entry(event_name)
             .or_insert_with(|| serde_json::json!([]));
 
         if let Some(arr) = event_hooks.as_array_mut() {
-            // Don't add duplicate entries
+            // Don't add duplicate entries for this exact script path on this event.
             let already_registered = arr.iter().any(|v| {
                 v.as_object()
                     .and_then(|obj| obj.get("command"))
                     .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.contains("cwt-"))
+                    .is_some_and(|c| c == script_str)
             });
 
             if !already_registered {
@@ -219,13 +232,19 @@ fn unpatch_claude_settings(repo_root: &Path) -> Result<()> {
         .and_then(|obj| obj.get_mut("hooks"))
         .and_then(|h| h.as_object_mut())
     {
+        let managed_paths = managed_hook_path_set(&repo_root.join(".cwt/hooks"));
+
         for (_event_name, event_hooks) in hooks.iter_mut() {
             if let Some(arr) = event_hooks.as_array_mut() {
                 arr.retain(|v| {
-                    !v.as_object()
+                    let command = v
+                        .as_object()
                         .and_then(|obj| obj.get("command"))
-                        .and_then(|c| c.as_str())
-                        .is_some_and(|c| c.contains("cwt-"))
+                        .and_then(|c| c.as_str());
+                    match command {
+                        Some(c) => !managed_paths.contains(c),
+                        None => true,
+                    }
                 });
             }
         }

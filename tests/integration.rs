@@ -592,13 +592,17 @@ fn test_hooks_install_patches_settings_json() {
     assert!(settings["hooks"]["Notification"].is_array());
     assert!(settings["hooks"]["SubagentStop"].is_array());
 
-    // Verify cwt entries exist
+    // Verify exact managed hook entry exists
     let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
+    let expected = root
+        .join(".cwt/hooks/cwt-stop.sh")
+        .to_string_lossy()
+        .to_string();
     assert!(
         stop_hooks
             .iter()
-            .any(|h| h["command"].as_str().unwrap_or("").contains("cwt-")),
-        "Stop hook should reference cwt script"
+            .any(|h| h["command"].as_str().unwrap_or("") == expected),
+        "Stop hook should reference cwt stop script"
     );
 }
 
@@ -629,13 +633,17 @@ fn test_hooks_uninstall_cleans_settings_json() {
     let content = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
     let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-    // cwt entries should be removed from hook arrays
+    // managed cwt entries should be removed from hook arrays
     if let Some(stop_hooks) = settings["hooks"]["Stop"].as_array() {
+        let expected = root
+            .join(".cwt/hooks/cwt-stop.sh")
+            .to_string_lossy()
+            .to_string();
         assert!(
             !stop_hooks
                 .iter()
-                .any(|h| h["command"].as_str().unwrap_or("").contains("cwt-")),
-            "cwt hooks should be removed from settings.json"
+                .any(|h| h["command"].as_str().unwrap_or("") == expected),
+            "managed cwt hooks should be removed from settings.json"
         );
     }
 }
@@ -652,11 +660,108 @@ fn test_hooks_install_idempotent() {
 
     // Should not duplicate entries
     let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
+    let expected = root
+        .join(".cwt/hooks/cwt-stop.sh")
+        .to_string_lossy()
+        .to_string();
     let cwt_count = stop_hooks
         .iter()
-        .filter(|h| h["command"].as_str().unwrap_or("").contains("cwt-"))
+        .filter(|h| h["command"].as_str().unwrap_or("") == expected)
         .count();
     assert_eq!(cwt_count, 1, "should not duplicate hook entries");
+}
+
+#[test]
+fn test_hooks_install_adds_managed_hook_even_with_other_cwt_like_command() {
+    let (_tmp, root) = make_test_repo();
+
+    let settings_dir = root.join(".claude");
+    std::fs::create_dir_all(&settings_dir).unwrap();
+    std::fs::write(
+        settings_dir.join("settings.json"),
+        serde_json::json!({
+            "hooks": {
+                "Stop": [
+                    {"type": "command", "command": "/usr/local/bin/cwt-custom-stop.sh"}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    run_cwt_ok(&root, &["hooks", "install"]);
+
+    let content = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
+    let managed = root
+        .join(".cwt/hooks/cwt-stop.sh")
+        .to_string_lossy()
+        .to_string();
+
+    assert!(
+        stop_hooks
+            .iter()
+            .any(|h| h["command"].as_str().unwrap_or("") == "/usr/local/bin/cwt-custom-stop.sh"),
+        "existing cwt-like user hook should be preserved"
+    );
+    assert!(
+        stop_hooks
+            .iter()
+            .any(|h| h["command"].as_str().unwrap_or("") == managed),
+        "managed stop hook should still be added"
+    );
+}
+
+#[test]
+fn test_hooks_uninstall_preserves_unrelated_cwt_like_hooks() {
+    let (_tmp, root) = make_test_repo();
+
+    run_cwt_ok(&root, &["hooks", "install"]);
+
+    let settings_path = root.join(".claude/settings.json");
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let mut settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    settings["hooks"]["Stop"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "type": "command",
+            "command": "/opt/team-hooks/cwt-extra-stop.sh"
+        }));
+
+    std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .unwrap();
+
+    run_cwt_ok(&root, &["hooks", "uninstall"]);
+
+    let content = std::fs::read_to_string(&settings_path).unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
+
+    assert!(
+        stop_hooks
+            .iter()
+            .any(|h| h["command"].as_str().unwrap_or("") == "/opt/team-hooks/cwt-extra-stop.sh"),
+        "unrelated cwt-like hook should be preserved"
+    );
+
+    let managed = root
+        .join(".cwt/hooks/cwt-stop.sh")
+        .to_string_lossy()
+        .to_string();
+    assert!(
+        !stop_hooks
+            .iter()
+            .any(|h| h["command"].as_str().unwrap_or("") == managed),
+        "managed hook should be removed"
+    );
 }
 
 #[test]

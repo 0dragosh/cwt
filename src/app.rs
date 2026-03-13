@@ -41,6 +41,18 @@ pub enum FocusPanel {
     Inspector,
 }
 
+fn clamp_selected_index(current: Option<usize>, count: usize) -> Option<usize> {
+    if count == 0 {
+        None
+    } else {
+        match current {
+            Some(i) if i < count => Some(i),
+            Some(_) => Some(count - 1),
+            None => Some(0),
+        }
+    }
+}
+
 /// Top-level application state.
 pub struct App {
     pub manager: Manager,
@@ -927,13 +939,8 @@ impl App {
 
     fn clamp_selection(&mut self) {
         let count = self.filtered_worktrees().len();
-        if count == 0 {
-            self.list_state.select(None);
-        } else if let Some(i) = self.list_state.selected() {
-            if i >= count {
-                self.list_state.select(Some(count - 1));
-            }
-        }
+        self.list_state
+            .select(clamp_selected_index(self.list_state.selected(), count));
     }
 
     /// Select a worktree by name, accounting for any active filter.
@@ -3143,13 +3150,10 @@ impl ForestApp {
             .selected_repo()
             .map(|r| self.filtered_worktrees_for(r).len())
             .unwrap_or(0);
-        if count == 0 {
-            self.worktree_list_state.select(None);
-        } else if let Some(i) = self.worktree_list_state.selected() {
-            if i >= count {
-                self.worktree_list_state.select(Some(count - 1));
-            }
-        }
+        self.worktree_list_state.select(clamp_selected_index(
+            self.worktree_list_state.selected(),
+            count,
+        ));
     }
 
     /// Called when the selected repo changes — reset worktree selection.
@@ -3823,5 +3827,31 @@ impl ForestApp {
         }
 
         self.refresh();
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::clamp_selected_index;
+
+    #[test]
+    fn clamp_selected_index_handles_empty_lists() {
+        assert_eq!(clamp_selected_index(Some(3), 0), None);
+        assert_eq!(clamp_selected_index(None, 0), None);
+    }
+
+    #[test]
+    fn clamp_selected_index_defaults_to_first_item_when_missing_selection() {
+        assert_eq!(clamp_selected_index(None, 4), Some(0));
+    }
+
+    #[test]
+    fn clamp_selected_index_clamps_out_of_bounds_to_last_item() {
+        assert_eq!(clamp_selected_index(Some(9), 3), Some(2));
+    }
+
+    #[test]
+    fn clamp_selected_index_keeps_valid_selection() {
+        assert_eq!(clamp_selected_index(Some(1), 3), Some(1));
     }
 }
