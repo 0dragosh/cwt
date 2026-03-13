@@ -169,6 +169,12 @@ fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    use std::sync::{Mutex, OnceLock};
+
+    fn tmux_env_lock() -> &'static Mutex<()> {
+        static TMUX_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        TMUX_ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_shell_escape_simple_path() {
@@ -217,6 +223,20 @@ mod tests {
             Some(OsStr::new("/tmp/tmux-501/default,123,0")),
             || true,
         ));
+    }
+
+    #[test]
+    fn is_inside_tmux_rejects_a_stale_tmux_environment() {
+        let _guard = tmux_env_lock().lock().unwrap();
+        let original_tmux = std::env::var_os("TMUX");
+
+        std::env::set_var("TMUX", "/tmp/tmux-501/definitely-stale,123,0");
+        assert!(!is_inside_tmux());
+
+        match original_tmux {
+            Some(value) => std::env::set_var("TMUX", value),
+            None => std::env::remove_var("TMUX"),
+        }
     }
 
     /// Verify create_pane uses `new-window` (tabs) not `split-window` (splits).
