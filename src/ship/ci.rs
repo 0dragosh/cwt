@@ -37,16 +37,19 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
         return CiStatus::None;
     };
 
-    // Verify the run belongs to the current HEAD to avoid showing stale results
+    // Verify the run belongs to the branch tip to avoid showing stale results.
+    // Use `git rev-parse <branch>` instead of HEAD so this works correctly
+    // even when repo_path is the repo root rather than the worktree directory.
     if let Some(head_sha) = run.get("headSha").and_then(|v| v.as_str()) {
-        let current_head = Command::new("git")
-            .args(["rev-parse", "HEAD"])
+        let branch_tip = Command::new("git")
+            .args(["rev-parse", branch])
             .current_dir(repo_path)
             .output()
             .ok()
+            .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-        if let Some(ref current) = current_head {
-            if !current.is_empty() && head_sha != current {
+        if let Some(ref tip) = branch_tip {
+            if !tip.is_empty() && head_sha != tip {
                 // CI run is for a different commit — report as stale/none
                 return CiStatus::None;
             }

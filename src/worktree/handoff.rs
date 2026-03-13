@@ -189,9 +189,13 @@ pub fn execute(
                     .context("failed to apply uncommitted changes to local")
                 {
                     if commits_applied {
+                        let commit_count = base_commit
+                            .map(|b| count_commits_since_base(worktree_path, b))
+                            .unwrap_or(0);
                         eprintln!(
                             "warning: committed changes were applied but uncommitted patch failed. \
-                             Consider reverting with `git reset HEAD~N` if needed."
+                             Consider reverting with `git reset HEAD~{}` if needed.",
+                            commit_count
                         );
                     }
                     return Err(e);

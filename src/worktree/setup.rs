@@ -46,8 +46,11 @@ fn execute_script(worktree_path: &Path, script: &str, timeout_secs: u64) -> Resu
         canonical
     };
 
-    // Use Command::new with the script path directly instead of sh -c to avoid injection
-    let mut child = Command::new(&script_path)
+    // Use Command::new("sh") with the script path as an argument (not via -c)
+    // to avoid command injection while preserving compatibility with scripts
+    // that lack a shebang or executable permission.
+    let mut child = Command::new("sh")
+        .arg(&script_path)
         .current_dir(worktree_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

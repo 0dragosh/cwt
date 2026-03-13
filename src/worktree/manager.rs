@@ -88,21 +88,23 @@ impl Manager {
 
         // Apply stashed changes to the new worktree
         if stashed {
-            // Apply stash to worktree (best-effort)
-            let stash_diff = std::process::Command::new("git")
+            // Apply stash to worktree (best-effort) — never use `?` here
+            // because stash_pop must always run to restore the original state
+            let patch_result = std::process::Command::new("git")
                 .args(["stash", "show", "-p"])
                 .current_dir(&self.repo_root)
-                .output()
-                .context("failed to get stash diff")?;
+                .output();
 
-            if stash_diff.status.success() {
-                let patch = String::from_utf8_lossy(&stash_diff.stdout);
-                if !patch.is_empty() {
-                    let _ = git::commands::apply_patch(&wt_abs_path, &patch);
+            if let Ok(stash_diff) = patch_result {
+                if stash_diff.status.success() {
+                    let patch = String::from_utf8_lossy(&stash_diff.stdout);
+                    if !patch.is_empty() {
+                        let _ = git::commands::apply_patch(&wt_abs_path, &patch);
+                    }
                 }
             }
 
-            // Pop stash in original dir to restore it
+            // Pop stash in original dir to restore it — must always run
             let _ = git::commands::stash_pop(&self.repo_root);
         }
 

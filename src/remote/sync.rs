@@ -40,7 +40,11 @@ pub fn git_pull_on_remote(
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
 
-    let cmd = format!("cd '{}' && git pull origin '{}' --ff-only", wt_path, branch);
+    let cmd = format!(
+        "cd {} && git pull origin {} --ff-only",
+        ssh_shell_quote(&wt_path),
+        ssh_shell_quote(branch)
+    );
     host.ssh_exec(&cmd).with_context(|| {
         format!(
             "failed to pull on remote worktree '{}' on '{}'",
@@ -116,7 +120,7 @@ fn apply_patch_on_remote(
         ssh_cmd.arg(arg);
     }
     ssh_cmd.arg(host.ssh_dest());
-    ssh_cmd.arg(format!("cd '{}' && git apply -", wt_path));
+    ssh_cmd.arg(format!("cd {} && git apply -", ssh_shell_quote(&wt_path)));
     ssh_cmd.stdin(std::process::Stdio::piped());
     ssh_cmd.stdout(std::process::Stdio::piped());
     ssh_cmd.stderr(std::process::Stdio::piped());
@@ -151,7 +155,11 @@ pub fn list_remote_worktrees(host: &RemoteHost, repo_name: &str) -> Result<Vec<S
 
     // Check if the worktrees directory exists
     let (stdout, _, success) =
-        host.ssh_exec_fallible(&format!("test -d '{}' && ls -1 '{}'", wt_dir, wt_dir))?;
+        host.ssh_exec_fallible(&format!(
+            "test -d {} && ls -1 {}",
+            ssh_shell_quote(&wt_dir),
+            ssh_shell_quote(&wt_dir)
+        ))?;
 
     if !success {
         return Ok(Vec::new());
@@ -177,6 +185,11 @@ pub fn get_repo_remote_url(local_repo_root: &Path) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Shell-quote a string for safe embedding in SSH commands.
+fn ssh_shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Get the repository name from the local repo root path.

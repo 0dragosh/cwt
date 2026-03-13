@@ -144,8 +144,9 @@ pub fn render(f: &mut Frame, dialog: &DispatchDialog) {
     // Task list
     let mut task_lines_vec: Vec<Line> = Vec::new();
     for (i, task) in dialog.tasks.iter().enumerate() {
-        let truncated = if task.len() > 55 {
-            format!("{}...", &task[..52])
+        let truncated = if task.chars().count() > 55 {
+            let t: String = task.chars().take(52).collect();
+            format!("{}...", t)
         } else {
             task.clone()
         };

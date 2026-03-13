@@ -90,9 +90,11 @@ fn run_listener(path: &Path, tx: mpsc::SyncSender<HookEvent>) -> Result<()> {
         .set_nonblocking(true)
         .context("failed to set socket non-blocking mode")?;
 
+    let mut idle_cycles: u32 = 0;
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
+                idle_cycles = 0;
                 // Set the stream to blocking for reading lines
                 stream.set_nonblocking(false).ok();
                 let reader = BufReader::new(stream);
@@ -124,9 +126,26 @@ fn run_listener(path: &Path, tx: mpsc::SyncSender<HookEvent>) -> Result<()> {
                 // No pending connection — sleep briefly then retry
                 std::thread::sleep(std::time::Duration::from_millis(100));
 
-                // Check if the receiver is still alive by trying a dummy operation
-                // The channel will be disconnected when the TUI drops the receiver
-                // We detect this on the next actual send, but we can also just continue
+                // Check if the receiver has been dropped (TUI shutting down).
+                // send() returns Err on a disconnected channel, so we use a
+                // lightweight probe: try_send would also work but isn't available
+                // on SyncSender. Instead we send a no-op variant if available,
+                // or we can just check by attempting to send and catching disconnect.
+                // Since we don't have a no-op event, check via the internal state:
+                // SyncSender::send blocks, but we can detect disconnect by trying
+                // a zero-size reserve. The simplest approach: just return Ok(())
+                // when send fails on next real event. But to avoid spinning forever
+                // when no events arrive, we track elapsed idle time.
+                // After 1 second of idle WouldBlock, do a liveness probe.
+                if idle_cycles >= 10 {
+                    // Every ~1 second (10 * 100ms), probe channel liveness
+                    // by checking if the path still exists (TUI removes socket on drop)
+                    if !path.exists() {
+                        return Ok(());
+                    }
+                    idle_cycles = 0;
+                }
+                idle_cycles += 1;
                 continue;
             }
             Err(e) => {
