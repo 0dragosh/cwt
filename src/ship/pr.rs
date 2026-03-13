@@ -159,11 +159,43 @@ pub fn commit_and_push(worktree_path: &Path, branch: &str) -> Result<String> {
     }
 }
 
-/// Generate a PR body from the session transcript.
-/// Reads the last few assistant messages and creates a summary.
+/// Generate a PR title from the worktree's task info.
+/// Uses the task title if available, otherwise falls back to worktree name + branch.
+pub fn generate_pr_title(worktree: &Worktree) -> String {
+    if let Some(ref title) = worktree.task_title {
+        // Trim to a reasonable PR title length
+        if title.chars().count() > 120 {
+            let truncated: String = title.chars().take(117).collect();
+            format!("{}...", truncated)
+        } else {
+            title.clone()
+        }
+    } else {
+        format!("{}: {}", worktree.name, worktree.branch)
+    }
+}
+
+/// Generate a PR body from the task description and session transcript.
+/// Uses the task description if available, supplemented by transcript context.
 pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
     let mut body = String::new();
     body.push_str("## Summary\n\n");
+
+    // Use task description if available
+    if let Some(ref description) = worktree.task_description {
+        // Truncate very long descriptions (char-safe)
+        let desc = if description.chars().count() > 3000 {
+            let truncated: String = description.chars().take(3000).collect();
+            format!("{}...", truncated)
+        } else {
+            description.clone()
+        };
+        body.push_str(&desc);
+        body.push_str("\n\n");
+    } else if let Some(ref title) = worktree.task_title {
+        body.push_str(title);
+        body.push_str("\n\n");
+    }
 
     // Try to get transcript summary
     let transcript_summary = session::tracker::find_project_dir(worktree_path)
@@ -187,13 +219,17 @@ pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
 
     if let Some(summary) = transcript_summary {
         if !summary.is_empty() {
-            body.push_str("From Claude session transcript:\n\n");
+            body.push_str("### Session context\n\n");
             body.push_str(&summary);
             body.push('\n');
-        } else {
-            body.push_str("_Changes from cwt worktree._\n\n");
         }
-    } else {
+    }
+
+    // Only show the fallback if we have no task info AND no transcript
+    if worktree.task_title.is_none()
+        && worktree.task_description.is_none()
+        && !body.contains("### Session context")
+    {
         body.push_str("_Changes from cwt worktree._\n\n");
     }
 

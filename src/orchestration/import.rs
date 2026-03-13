@@ -231,6 +231,19 @@ pub fn import_issues(
                 }
             };
 
+            // Store issue title and body on the worktree for PR generation
+            if dr.error.is_none() && !dr.worktree_name.is_empty() {
+                if let Ok(mut state) = manager.load_state() {
+                    if let Some(stored) = state.worktrees.get_mut(&dr.worktree_name) {
+                        stored.task_title = Some(issue.title.clone());
+                        if !issue.body.is_empty() {
+                            stored.task_description = Some(issue.body.clone());
+                        }
+                    }
+                    let _ = manager.save_state(&state);
+                }
+            }
+
             ImportResult {
                 issue: issue.clone(),
                 worktree_name: dr.worktree_name,

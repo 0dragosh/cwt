@@ -1579,7 +1579,7 @@ impl App {
         }
 
         let body = ship::pr::generate_pr_body(wt_abs, wt);
-        let title = format!("{}: {}", wt.name, wt.branch);
+        let title = ship::pr::generate_pr_title(wt);
 
         match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
             Ok(result) => {
@@ -3824,7 +3824,7 @@ impl ForestApp {
         }
 
         let body = ship::pr::generate_pr_body(wt_abs, wt);
-        let title = format!("{}: {}", wt.name, wt.branch);
+        let title = ship::pr::generate_pr_title(wt);
 
         match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
             Ok(result) => {
