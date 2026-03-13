@@ -104,6 +104,9 @@ pub fn launch_with_prompt(
 }
 
 /// Shell-quote a string for safe embedding in a tmux command.
+/// Single-quoting prevents expansion of $, `, !, etc.
+/// Newlines are replaced with spaces to prevent command splitting.
 fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+    let sanitized = s.replace(['\n', '\r'], " ");
+    format!("'{}'", sanitized.replace('\'', "'\\''"))
 }

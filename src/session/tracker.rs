@@ -4,15 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::worktree::model::WorktreeStatus;
 
 /// Determine the session status for a worktree based on its tmux pane.
+/// Uses a single tmux query to avoid TOCTOU race between pane_exists and pane_current_command.
 pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
     match tmux_pane {
         None => WorktreeStatus::Idle,
         Some(pane_id) => {
-            if !crate::tmux::pane::pane_exists(pane_id) {
-                return WorktreeStatus::Done;
-            }
-
-            // Check what command is running in the pane
+            // Single atomic query: if the pane exists, this returns the command;
+            // if it doesn't, the command fails.
             match crate::tmux::pane::pane_current_command(pane_id) {
                 Ok(cmd) => {
                     let cmd_lower = cmd.to_lowercase();
@@ -23,6 +21,7 @@ pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
                         WorktreeStatus::Done
                     }
                 }
+                // Pane doesn't exist or tmux error
                 Err(_) => WorktreeStatus::Done,
             }
         }

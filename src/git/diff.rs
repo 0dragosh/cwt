@@ -20,15 +20,20 @@ pub fn diff_stat(worktree_path: &Path) -> Result<DiffStat> {
         .context("failed to run git diff --stat")?;
 
     if !output.status.success() {
-        // If HEAD doesn't exist (empty repo), try without HEAD
-        let output = Command::new("git")
-            .args(["diff", "--stat"])
-            .current_dir(worktree_path)
-            .output()
-            .context("failed to run git diff --stat")?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Only retry without HEAD if the error indicates missing HEAD (empty repo / unborn branch)
+        if stderr.contains("unknown revision") || stderr.contains("bad revision") {
+            let output = Command::new("git")
+                .args(["diff", "--stat"])
+                .current_dir(worktree_path)
+                .output()
+                .context("failed to run git diff --stat")?;
 
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        return Ok(parse_stat_summary(&raw));
+            let raw = String::from_utf8_lossy(&output.stdout).to_string();
+            return Ok(parse_stat_summary(&raw));
+        }
+        // For other errors (permissions, corruption), propagate
+        anyhow::bail!("git diff --stat HEAD failed: {}", stderr.trim());
     }
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();

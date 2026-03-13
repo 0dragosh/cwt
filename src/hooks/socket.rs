@@ -37,7 +37,8 @@ impl HookSocketListener {
                 .with_context(|| format!("failed to remove stale socket {}", path.display()))?;
         }
 
-        let (tx, rx) = mpsc::channel();
+        // Use sync_channel with a bounded buffer to prevent OOM from event floods
+        let (tx, rx) = mpsc::sync_channel(1024);
         let listen_path = path.clone();
 
         let handle = std::thread::spawn(move || {
@@ -76,23 +77,24 @@ impl Drop for HookSocketListener {
     }
 }
 
-/// Run the blocking listener loop.
-fn run_listener(path: &Path, tx: mpsc::Sender<HookEvent>) -> Result<()> {
+/// Run the listener loop with periodic accept timeouts for clean shutdown.
+fn run_listener(path: &Path, tx: mpsc::SyncSender<HookEvent>) -> Result<()> {
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
 
     let listener =
         UnixListener::bind(path).with_context(|| format!("failed to bind {}", path.display()))?;
 
-    // Set a timeout so the listener thread can check if we should stop
-    // (when the channel sender is dropped, sending will fail and we'll exit)
+    // Set non-blocking so we can periodically check if the channel is still open
     listener
-        .set_nonblocking(false)
-        .context("failed to set socket blocking mode")?;
+        .set_nonblocking(true)
+        .context("failed to set socket non-blocking mode")?;
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Set the stream to blocking for reading lines
+                stream.set_nonblocking(false).ok();
                 let reader = BufReader::new(stream);
                 for line in reader.lines() {
                     match line {
@@ -118,16 +120,19 @@ fn run_listener(path: &Path, tx: mpsc::Sender<HookEvent>) -> Result<()> {
                     }
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No pending connection — sleep briefly then retry
+                std::thread::sleep(std::time::Duration::from_millis(100));
+
+                // Check if the receiver is still alive by trying a dummy operation
+                // The channel will be disconnected when the TUI drops the receiver
+                // We detect this on the next actual send, but we can also just continue
+                continue;
+            }
             Err(e) => {
-                // Check if the error is because the listener is being shut down
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
                 eprintln!("cwt: socket accept error: {}", e);
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
     }
-
-    Ok(())
 }

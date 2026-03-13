@@ -173,9 +173,10 @@ pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
         .map(|messages| {
             let mut summary = String::new();
             for msg in &messages {
-                // Take the first ~200 chars of each message
-                let content = if msg.content.len() > 200 {
-                    format!("{}...", &msg.content[..200])
+                // Take the first ~200 chars of each message (char-safe)
+                let content = if msg.content.chars().count() > 200 {
+                    let truncated: String = msg.content.chars().take(200).collect();
+                    format!("{}...", truncated)
                 } else {
                     msg.content.clone()
                 };
@@ -246,9 +247,15 @@ pub fn create_pr(
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/42)
+    // Handle fragments and query params (e.g., pull/42#discussion, pull/42?diff=split)
     let pr_number = url
         .rsplit('/')
         .next()
+        .map(|s| {
+            // Strip fragment (#...) and query params (?...)
+            s.split('#').next().unwrap_or(s)
+                .split('?').next().unwrap_or(s)
+        })
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 

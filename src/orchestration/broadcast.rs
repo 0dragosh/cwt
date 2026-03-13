@@ -27,8 +27,14 @@ pub fn broadcast_prompt(worktrees: &[Worktree], prompt: &str) -> Vec<BroadcastRe
                 };
             }
 
+            // Sanitize the prompt: strip control characters that could interfere with tmux
+            let sanitized_prompt: String = prompt
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .collect();
+
             // Send the prompt text to the pane via tmux send-keys
-            match tmux::pane::send_keys(pane_id, prompt) {
+            match tmux::pane::send_keys(pane_id, &sanitized_prompt) {
                 Ok(()) => BroadcastResult {
                     worktree_name: wt.name.clone(),
                     success: true,

@@ -18,17 +18,21 @@ pub fn launch_remote_session(
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
     let tmux_session = format!("cwt-{}", worktree_name);
 
-    // Build the claude command
+    // Build the claude command with proper shell quoting
     let mut claude_parts = vec!["claude".to_string()];
     for arg in claude_args {
-        claude_parts.push(arg.clone());
+        claude_parts.push(remote_shell_quote(arg));
     }
     let claude_cmd = claude_parts.join(" ");
 
     // Create a tmux session on the remote host and run claude in it
     let remote_cmd = format!(
-        "tmux new-session -d -s '{}' -c '{}' '{}' 2>/dev/null || tmux send-keys -t '{}' '{}' Enter",
-        tmux_session, wt_path, claude_cmd, tmux_session, claude_cmd,
+        "tmux new-session -d -s {} -c {} {} 2>/dev/null || tmux send-keys -t {} {} Enter",
+        remote_shell_quote(&tmux_session),
+        remote_shell_quote(&wt_path),
+        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&tmux_session),
+        remote_shell_quote(&claude_cmd),
     );
 
     host.ssh_exec(&remote_cmd).with_context(|| {
@@ -55,15 +59,19 @@ pub fn resume_remote_session(
 
     let mut claude_parts = vec!["claude".to_string()];
     claude_parts.push("--resume".to_string());
-    claude_parts.push(session_id.to_string());
+    claude_parts.push(remote_shell_quote(session_id));
     for arg in claude_args {
-        claude_parts.push(arg.clone());
+        claude_parts.push(remote_shell_quote(arg));
     }
     let claude_cmd = claude_parts.join(" ");
 
     let remote_cmd = format!(
-        "tmux new-session -d -s '{}' -c '{}' '{}' 2>/dev/null || tmux send-keys -t '{}' '{}' Enter",
-        tmux_session, wt_path, claude_cmd, tmux_session, claude_cmd,
+        "tmux new-session -d -s {} -c {} {} 2>/dev/null || tmux send-keys -t {} {} Enter",
+        remote_shell_quote(&tmux_session),
+        remote_shell_quote(&wt_path),
+        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&tmux_session),
+        remote_shell_quote(&claude_cmd),
     );
 
     host.ssh_exec(&remote_cmd)?;
@@ -87,7 +95,7 @@ pub fn focus_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<St
     }
     ssh_args.push("-t".to_string()); // Force TTY allocation
     ssh_args.push(host.ssh_dest());
-    ssh_args.push(format!("tmux attach -t '{}'", tmux_session));
+    ssh_args.push(format!("tmux attach -t {}", remote_shell_quote(&tmux_session)));
 
     let ssh_command = ssh_args.join(" ");
     let pane_title = format!("cwt:remote:{}:{}", host.name, worktree_name);
@@ -112,8 +120,8 @@ pub fn focus_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<St
 pub fn is_remote_session_alive(host: &RemoteHost, worktree_name: &str) -> bool {
     let tmux_session = format!("cwt-{}", worktree_name);
     let cmd = format!(
-        "tmux has-session -t '{}' 2>/dev/null && echo alive",
-        tmux_session
+        "tmux has-session -t {} 2>/dev/null && echo alive",
+        remote_shell_quote(&tmux_session)
     );
 
     host.ssh_exec_fallible(&cmd)
@@ -125,8 +133,8 @@ pub fn is_remote_session_alive(host: &RemoteHost, worktree_name: &str) -> bool {
 pub fn kill_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<()> {
     let tmux_session = format!("cwt-{}", worktree_name);
     let cmd = format!(
-        "tmux kill-session -t '{}' 2>/dev/null || true",
-        tmux_session
+        "tmux kill-session -t {} 2>/dev/null || true",
+        remote_shell_quote(&tmux_session)
     );
     let _ = host.ssh_exec_fallible(&cmd);
     Ok(())
@@ -139,8 +147,9 @@ pub fn check_remote_session_status(host: &RemoteHost, worktree_name: &str) -> Re
 
     // Check if tmux session exists
     let check_cmd = format!(
-        "tmux has-session -t '{}' 2>/dev/null && tmux display-message -t '{}' -p '#{{pane_current_command}}' 2>/dev/null",
-        tmux_session, tmux_session
+        "tmux has-session -t {} 2>/dev/null && tmux display-message -t {} -p '#{{pane_current_command}}' 2>/dev/null",
+        remote_shell_quote(&tmux_session),
+        remote_shell_quote(&tmux_session)
     );
 
     match host.ssh_exec_fallible(&check_cmd) {
@@ -188,7 +197,7 @@ pub fn open_remote_shell(
     }
     ssh_args.push("-t".to_string());
     ssh_args.push(host.ssh_dest());
-    ssh_args.push(format!("cd '{}' && exec $SHELL -l", wt_path));
+    ssh_args.push(format!("cd {} && exec $SHELL -l", remote_shell_quote(&wt_path)));
 
     let ssh_command = ssh_args.join(" ");
     let pane_title = format!("cwt:shell:{}:{}", host.name, worktree_name);
@@ -200,4 +209,10 @@ pub fn open_remote_shell(
     )?;
 
     Ok(pane_id)
+}
+
+/// Shell-quote a string for safe embedding in remote SSH/tmux commands.
+/// Wraps in single quotes and escapes any embedded single quotes.
+fn remote_shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }

@@ -59,15 +59,28 @@ pub fn render(
             let name_span = if !filter.is_empty() {
                 let name_lower = wt.name.to_lowercase();
                 if let Some(pos) = name_lower.find(&filter_lower) {
-                    // Show the name with the matched portion highlighted
-                    let pre = &format!(" {}", &wt.name)[..pos + 1];
-                    let matched = &wt.name[pos..pos + filter.len()];
-                    let post = &wt.name[pos + filter.len()..];
+                    // Use char-boundary-aware slicing to avoid panics on multi-byte chars
+                    // Find the byte offset in the original string that corresponds to the
+                    // character position found in the lowercased string
+                    let byte_start = wt.name
+                        .char_indices()
+                        .nth(name_lower[..pos].chars().count())
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    let filter_char_count = filter_lower.chars().count();
+                    let byte_end = wt.name
+                        .char_indices()
+                        .nth(name_lower[..pos].chars().count() + filter_char_count)
+                        .map(|(i, _)| i)
+                        .unwrap_or(wt.name.len());
+                    let pre = format!(" {}", &wt.name[..byte_start]);
+                    let matched = &wt.name[byte_start..byte_end];
+                    let post = &wt.name[byte_end..];
 
                     // Return multiple spans combined in a vec
                     vec![
                         Span::styled(
-                            pre.to_string(),
+                            pre,
                             Style::default().add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(

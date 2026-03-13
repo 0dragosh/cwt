@@ -162,7 +162,7 @@ pub fn execute(
     match direction {
         HandoffDirection::WorktreeToLocal => {
             // Transfer committed changes via format-patch/am
-            if let Some(base) = base_commit {
+            let commits_applied = if let Some(base) = base_commit {
                 let commit_count = count_commits_since_base(worktree_path, base);
                 if commit_count > 0 {
                     let mbox = format_patch_commits(worktree_path, base)
@@ -170,16 +170,32 @@ pub fn execute(
                     if !mbox.trim().is_empty() {
                         apply_mailbox(local_path, &mbox)
                             .context("failed to apply commits to local")?;
+                        true
+                    } else {
+                        false
                     }
+                } else {
+                    false
                 }
-            }
+            } else {
+                false
+            };
 
             // Then apply uncommitted changes as a patch
             let patch = git::diff::diff_full(worktree_path)
                 .context("failed to generate diff from worktree")?;
             if !patch.trim().is_empty() {
-                git::commands::apply_patch(local_path, &patch)
-                    .context("failed to apply uncommitted changes to local")?;
+                if let Err(e) = git::commands::apply_patch(local_path, &patch)
+                    .context("failed to apply uncommitted changes to local")
+                {
+                    if commits_applied {
+                        eprintln!(
+                            "warning: committed changes were applied but uncommitted patch failed. \
+                             Consider reverting with `git reset HEAD~N` if needed."
+                        );
+                    }
+                    return Err(e);
+                }
             }
         }
         HandoffDirection::LocalToWorktree => {

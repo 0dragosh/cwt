@@ -6,6 +6,7 @@ use crate::ship::pr::CiStatus;
 
 /// Fetch the CI (GitHub Actions) status for a branch.
 /// Uses `gh run list` to check the latest workflow run status.
+/// Includes headSha to verify the run belongs to the current HEAD commit.
 pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
     let output = Command::new("gh")
         .args([
@@ -16,7 +17,7 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
             "--limit",
             "1",
             "--json",
-            "status,conclusion",
+            "status,conclusion,headSha",
         ])
         .current_dir(repo_path)
         .output();
@@ -35,6 +36,22 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
     let Some(run) = json.first() else {
         return CiStatus::None;
     };
+
+    // Verify the run belongs to the current HEAD to avoid showing stale results
+    if let Some(head_sha) = run.get("headSha").and_then(|v| v.as_str()) {
+        let current_head = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo_path)
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        if let Some(ref current) = current_head {
+            if !current.is_empty() && head_sha != current {
+                // CI run is for a different commit — report as stale/none
+                return CiStatus::None;
+            }
+        }
+    }
 
     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");
