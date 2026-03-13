@@ -162,3 +162,50 @@ pub fn find_latest_session_id(project_dir: &Path) -> Result<Option<String>> {
         .and_then(|p| p.file_stem())
         .map(|s| s.to_string_lossy().to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_status_returns_idle_for_none() {
+        assert_eq!(check_status(None), WorktreeStatus::Idle);
+    }
+
+    #[test]
+    fn check_status_returns_running_for_live_pid() {
+        // Use our own PID — guaranteed to be alive
+        let own_pid = std::process::id();
+        let id = format!("pid:{}", own_pid);
+        assert_eq!(check_status(Some(&id)), WorktreeStatus::Running);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_dead_pid() {
+        // PID 2147483647 almost certainly doesn't exist
+        assert_eq!(check_status(Some("pid:2147483647")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_malformed_pid() {
+        assert_eq!(check_status(Some("pid:")), WorktreeStatus::Done);
+        assert_eq!(check_status(Some("pid:abc")), WorktreeStatus::Done);
+        assert_eq!(check_status(Some("pid:-1")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn check_status_returns_done_for_invalid_tmux_pane() {
+        // A tmux pane ID that doesn't exist (no tmux server in tests)
+        assert_eq!(check_status(Some("%99999")), WorktreeStatus::Done);
+    }
+
+    #[test]
+    fn is_pid_alive_detects_self() {
+        assert!(is_pid_alive(std::process::id()));
+    }
+
+    #[test]
+    fn is_pid_alive_rejects_nonexistent() {
+        assert!(!is_pid_alive(2_147_483_647));
+    }
+}
