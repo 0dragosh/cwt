@@ -1,5 +1,5 @@
-use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::prelude::IndexedRandom;
+use rand::random;
 
 const ADJECTIVES: &[&str] = &[
     "bold", "calm", "dark", "deft", "fair", "fast", "firm", "glad", "gold", "keen", "kind", "lean",
@@ -18,10 +18,10 @@ const NOUNS: &[&str] = &[
 
 /// Generate a random slug like "bold-oak-a3f2".
 pub fn generate_slug() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let adj = ADJECTIVES.choose(&mut rng).unwrap();
     let noun = NOUNS.choose(&mut rng).unwrap();
-    let hex: u16 = rng.gen();
+    let hex: u16 = random();
     format!("{}-{}-{:04x}", adj, noun, hex)
 }
 
