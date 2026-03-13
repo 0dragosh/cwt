@@ -330,6 +330,10 @@ GC never prunes worktrees with running sessions, uncommitted changes, or unpushe
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code conventions, and how to submit changes.
 
+## Releases
+
+Releases are managed automatically by [release-plz](https://release-plz.ieni.dev/). Pushing conventional commits (`fix:`, `feat:`, etc.) to `main` triggers a release PR with version bump, lockfile update, and changelog. Merging the PR publishes to crates.io and creates a GitHub Release.
+
 ## License
 
 [MIT](LICENSE)
