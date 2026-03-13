@@ -36,7 +36,9 @@ fn execute_script(worktree_path: &Path, script: &str, timeout_secs: u64) -> Resu
         let joined = worktree_path.join(script);
         // Canonicalize to resolve ".." and validate the path stays within worktree
         let canonical = joined.canonicalize().unwrap_or(joined.clone());
-        let wt_canonical = worktree_path.canonicalize().unwrap_or(worktree_path.to_path_buf());
+        let wt_canonical = worktree_path
+            .canonicalize()
+            .unwrap_or(worktree_path.to_path_buf());
         if !canonical.starts_with(&wt_canonical) {
             anyhow::bail!(
                 "setup script path '{}' resolves outside the worktree directory",

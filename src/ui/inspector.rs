@@ -101,7 +101,9 @@ pub fn render(
     // Clamp meta_height so the diff section always gets at least a few lines
     let min_detail_height = 5u16;
     let separator_height = 1u16;
-    let max_meta = inner.height.saturating_sub(min_detail_height + separator_height);
+    let max_meta = inner
+        .height
+        .saturating_sub(min_detail_height + separator_height);
     let clamped_meta_height = meta_height.min(max_meta);
 
     let chunks = Layout::default()

@@ -253,8 +253,12 @@ pub fn create_pr(
         .next()
         .map(|s| {
             // Strip fragment (#...) and query params (?...)
-            s.split('#').next().unwrap_or(s)
-                .split('?').next().unwrap_or(s)
+            s.split('#')
+                .next()
+                .unwrap_or(s)
+                .split('?')
+                .next()
+                .unwrap_or(s)
         })
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);

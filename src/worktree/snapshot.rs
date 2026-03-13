@@ -39,7 +39,13 @@ pub fn save_snapshot(worktree: &Worktree, repo_root: &Path) -> Result<SnapshotEn
     let safe_name: String = worktree
         .name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let patch_filename = format!("{}-{}.patch", safe_name, timestamp);
     let patch_path = dir.join(&patch_filename);

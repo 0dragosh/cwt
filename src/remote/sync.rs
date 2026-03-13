@@ -154,12 +154,11 @@ pub fn list_remote_worktrees(host: &RemoteHost, repo_name: &str) -> Result<Vec<S
     let wt_dir = format!("{}/worktrees", repo_path);
 
     // Check if the worktrees directory exists
-    let (stdout, _, success) =
-        host.ssh_exec_fallible(&format!(
-            "test -d {} && ls -1 {}",
-            ssh_shell_quote(&wt_dir),
-            ssh_shell_quote(&wt_dir)
-        ))?;
+    let (stdout, _, success) = host.ssh_exec_fallible(&format!(
+        "test -d {} && ls -1 {}",
+        ssh_shell_quote(&wt_dir),
+        ssh_shell_quote(&wt_dir)
+    ))?;
 
     if !success {
         return Ok(Vec::new());

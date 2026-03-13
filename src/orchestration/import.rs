@@ -119,7 +119,8 @@ pub fn fetch_linear_issues(limit: usize) -> Result<Vec<Issue>> {
             "POST",
             "-H",
             "Content-Type: application/json",
-            "-K", "-", // Read config from stdin
+            "-K",
+            "-", // Read config from stdin
             "-d",
             &query,
             "https://api.linear.app/graphql",
@@ -136,7 +137,8 @@ pub fn fetch_linear_issues(limit: usize) -> Result<Vec<Issue>> {
     // Drop stdin to signal EOF
     drop(child.stdin.take());
 
-    let output = child.wait_with_output()
+    let output = child
+        .wait_with_output()
         .context("failed to call Linear API")?;
 
     if !output.status.success() {

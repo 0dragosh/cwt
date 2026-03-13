@@ -95,7 +95,10 @@ pub fn focus_remote_session(host: &RemoteHost, worktree_name: &str) -> Result<St
     }
     ssh_args.push("-t".to_string()); // Force TTY allocation
     ssh_args.push(host.ssh_dest());
-    ssh_args.push(format!("tmux attach -t {}", remote_shell_quote(&tmux_session)));
+    ssh_args.push(format!(
+        "tmux attach -t {}",
+        remote_shell_quote(&tmux_session)
+    ));
 
     let ssh_command = ssh_args.join(" ");
     let pane_title = format!("cwt:remote:{}:{}", host.name, worktree_name);
@@ -197,7 +200,10 @@ pub fn open_remote_shell(
     }
     ssh_args.push("-t".to_string());
     ssh_args.push(host.ssh_dest());
-    ssh_args.push(format!("cd {} && exec $SHELL -l", remote_shell_quote(&wt_path)));
+    ssh_args.push(format!(
+        "cd {} && exec $SHELL -l",
+        remote_shell_quote(&wt_path)
+    ));
 
     let ssh_command = ssh_args.join(" ");
     let pane_title = format!("cwt:shell:{}:{}", host.name, worktree_name);

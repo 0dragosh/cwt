@@ -79,7 +79,9 @@ impl Manager {
         };
 
         // Create the worktree — if this fails and we stashed, restore the stash first
-        if let Err(e) = git::commands::worktree_add(&self.repo_root, &wt_abs_path, &branch_name, base_branch) {
+        if let Err(e) =
+            git::commands::worktree_add(&self.repo_root, &wt_abs_path, &branch_name, base_branch)
+        {
             if stashed {
                 let _ = git::commands::stash_pop(&self.repo_root);
             }

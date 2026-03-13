@@ -161,7 +161,11 @@ impl RemoteHost {
     pub fn git_remote(&self, repo_name: &str, args: &[&str]) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let git_args: Vec<String> = args.iter().map(|a| ssh_shell_quote(a)).collect();
-        let command = format!("cd {} && git {}", ssh_shell_quote(&repo_path), git_args.join(" "));
+        let command = format!(
+            "cd {} && git {}",
+            ssh_shell_quote(&repo_path),
+            git_args.join(" ")
+        );
         self.ssh_exec(&command)
     }
 
@@ -170,7 +174,8 @@ impl RemoteHost {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
 
         // Check if repo already exists
-        let (_, _, exists) = self.ssh_exec_fallible(&format!("test -d {}/.git", ssh_shell_quote(&repo_path)))?;
+        let (_, _, exists) =
+            self.ssh_exec_fallible(&format!("test -d {}/.git", ssh_shell_quote(&repo_path)))?;
 
         if !exists {
             self.ensure_worktree_dir()?;
