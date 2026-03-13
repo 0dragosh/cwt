@@ -1,0 +1,2 @@
+[workspace]
+publish_flags = ["--locked"]

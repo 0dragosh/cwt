@@ -27,7 +27,7 @@
 
           cwt = craneLib.buildPackage {
             pname = "cwt";
-            version = "0.1.0";
+            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
             src = craneLib.cleanCargoSource ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config makeWrapper git ];
