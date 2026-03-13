@@ -66,11 +66,12 @@ fn dispatch_one(
         }
     };
 
-    // Update state with pane ID and running status
+    // Update state with pane ID, running status, and task info
     if let Ok(mut state) = manager.load_state() {
         if let Some(stored) = state.worktrees.get_mut(&wt.name) {
             stored.tmux_pane = Some(pane_id.clone());
             stored.status = WorktreeStatus::Running;
+            stored.task_title = Some(task.to_string());
         }
         let _ = manager.save_state(&state);
     }

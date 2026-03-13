@@ -30,7 +30,7 @@ pub fn ship(worktree: &Worktree, worktree_path: &Path) -> Result<ShipResult> {
     let body = pr::generate_pr_body(worktree_path, worktree);
 
     // Step 3: Create PR
-    let title = format!("{}: {}", worktree.name, worktree.branch);
+    let title = pr::generate_pr_title(worktree);
     let result = pr::create_pr(
         worktree_path,
         &worktree.branch,

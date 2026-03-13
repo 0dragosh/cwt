@@ -64,6 +64,14 @@ pub struct Worktree {
     /// Resource usage snapshot (disk, CPU, memory).
     #[serde(default)]
     pub resource_usage: Option<ResourceUsage>,
+    /// Task title (from dispatch prompt or imported issue title).
+    /// Used as PR title when creating pull requests.
+    #[serde(default)]
+    pub task_title: Option<String>,
+    /// Task description (from imported issue body or user-provided context).
+    /// Used in PR body when creating pull requests.
+    #[serde(default)]
+    pub task_description: Option<String>,
     /// If set, this worktree lives on a remote host (value is the host name).
     #[serde(default)]
     pub remote_host: Option<String>,
@@ -99,6 +107,8 @@ impl Worktree {
             container: None,
             ports: None,
             resource_usage: None,
+            task_title: None,
+            task_description: None,
             remote_host: None,
             remote_path: None,
         }
