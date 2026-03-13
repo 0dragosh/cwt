@@ -59,8 +59,7 @@ pub fn load_config_with_meta(repo_root: &Path) -> Result<(Config, ConfigMeta)> {
 
 /// Save config to a TOML file.
 pub fn save_config(config: &Config, path: &Path) -> Result<()> {
-    let content =
-        toml::to_string_pretty(config).context("failed to serialize config to TOML")?;
+    let content = toml::to_string_pretty(config).context("failed to serialize config to TOML")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create config directory {}", parent.display()))?;
@@ -109,8 +108,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let link_path = dir.path().join("config.toml");
         // Symlink to a fake /nix/store path (doesn't need to exist for read_link)
-        std::os::unix::fs::symlink("/nix/store/abc123-cwt-config/config.toml", &link_path)
-            .unwrap();
+        std::os::unix::fs::symlink("/nix/store/abc123-cwt-config/config.toml", &link_path).unwrap();
         assert!(is_nix_managed(&link_path));
     }
 
@@ -199,11 +197,7 @@ default_permission = "elevated"
         let fake_nix = dir.path().join("nix/store/fake-hash-cwt");
         std::fs::create_dir_all(&fake_nix).unwrap();
         let real_file = fake_nix.join("config.toml");
-        std::fs::write(
-            &real_file,
-            "[session]\ndefault_permission = \"elevated\"\n",
-        )
-        .unwrap();
+        std::fs::write(&real_file, "[session]\ndefault_permission = \"elevated\"\n").unwrap();
 
         // Symlink .cwt/config.toml -> the fake nix store path
         let config_path = cwt_dir.join("config.toml");

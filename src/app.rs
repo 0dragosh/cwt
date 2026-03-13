@@ -664,8 +664,11 @@ impl App {
                 let current = self.active_permission();
                 let next = current.cycle_next();
                 self.permission_override = Some(next);
-                self.status_message =
-                    format!("Permission level: {} ({})", next.label(), next.short_label());
+                self.status_message = format!(
+                    "Permission level: {} ({})",
+                    next.label(),
+                    next.short_label()
+                );
             }
             KeyCode::Char('M') => {
                 if self.config_meta.nix_managed {
@@ -674,11 +677,10 @@ impl App {
                 } else {
                     let level = self.active_permission();
                     self.manager.config.session.default_permission = level;
-                    let path = self
-                        .config_meta
-                        .source_path
-                        .clone()
-                        .unwrap_or_else(|| config::project_config_path(&self.manager.repo_root));
+                    let path =
+                        self.config_meta.source_path.clone().unwrap_or_else(|| {
+                            config::project_config_path(&self.manager.repo_root)
+                        });
                     match config::save_config(&self.manager.config, &path) {
                         Ok(()) => {
                             self.status_message = format!(
@@ -2889,8 +2891,11 @@ impl ForestApp {
                 let current = self.active_permission();
                 let next = current.cycle_next();
                 self.permission_override = Some(next);
-                self.status_message =
-                    format!("Permission level: {} ({})", next.label(), next.short_label());
+                self.status_message = format!(
+                    "Permission level: {} ({})",
+                    next.label(),
+                    next.short_label()
+                );
             }
             KeyCode::Char('M') => {
                 // In forest mode, save to the selected repo's config

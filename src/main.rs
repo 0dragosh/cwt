@@ -174,9 +174,7 @@ fn main() -> Result<()> {
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
         Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
         Some(Commands::Audit) => cmd_audit(&manager)?,
-        Some(Commands::Dispatch { tasks, base }) => {
-            cmd_dispatch(&manager, &tasks, &base)?
-        }
+        Some(Commands::Dispatch { tasks, base }) => cmd_dispatch(&manager, &tasks, &base)?,
         Some(Commands::Import {
             github,
             linear,

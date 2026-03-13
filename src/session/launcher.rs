@@ -126,7 +126,10 @@ fn json_deep_merge(base: &mut serde_json::Value, override_val: &serde_json::Valu
     match (base, override_val) {
         (serde_json::Value::Object(base_map), serde_json::Value::Object(over_map)) => {
             for (k, v) in over_map {
-                json_deep_merge(base_map.entry(k.clone()).or_insert(serde_json::Value::Null), v);
+                json_deep_merge(
+                    base_map.entry(k.clone()).or_insert(serde_json::Value::Null),
+                    v,
+                );
             }
         }
         (base, over) => {
@@ -284,7 +287,11 @@ mod tests {
         let claude_dir = dir.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
         let path = claude_dir.join("settings.local.json");
-        std::fs::write(&path, r#"{"existing": "value", "sandbox": {"timeout": 30}}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"existing": "value", "sandbox": {"timeout": 30}}"#,
+        )
+        .unwrap();
 
         let settings = json!({"sandbox": {"enabled": true}});
         inject_settings_override(dir.path(), &settings).unwrap();

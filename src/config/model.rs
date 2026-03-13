@@ -408,7 +408,10 @@ mod tests {
 
         // Unsandboxed has --dangerously-skip-permissions
         let unsandboxed = cfg.get(PermissionLevel::ElevatedUnsandboxed);
-        assert_eq!(unsandboxed.extra_args, vec!["--dangerously-skip-permissions"]);
+        assert_eq!(
+            unsandboxed.extra_args,
+            vec!["--dangerously-skip-permissions"]
+        );
         assert!(unsandboxed.settings_override.is_none());
     }
 

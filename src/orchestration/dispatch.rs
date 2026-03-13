@@ -31,7 +31,12 @@ pub fn dispatch_tasks(
 }
 
 /// Dispatch a single task: create worktree, launch Claude with --prompt.
-fn dispatch_one(manager: &Manager, task: &str, base_branch: &str, permission: PermissionLevel) -> DispatchResult {
+fn dispatch_one(
+    manager: &Manager,
+    task: &str,
+    base_branch: &str,
+    permission: PermissionLevel,
+) -> DispatchResult {
     // Create worktree (auto-name)
     let wt = match manager.create(None, base_branch, false) {
         Ok(wt) => wt,
@@ -48,7 +53,8 @@ fn dispatch_one(manager: &Manager, task: &str, base_branch: &str, permission: Pe
     let wt_abs = manager.worktree_abs_path(&wt);
 
     // Launch Claude with --prompt flag
-    let pane_id = match launch_with_prompt(&wt, &wt_abs, task, &manager.config.session, permission) {
+    let pane_id = match launch_with_prompt(&wt, &wt_abs, task, &manager.config.session, permission)
+    {
         Ok(id) => id,
         Err(e) => {
             return DispatchResult {
