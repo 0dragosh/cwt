@@ -20,15 +20,20 @@ pub fn diff_stat(worktree_path: &Path) -> Result<DiffStat> {
         .context("failed to run git diff --stat")?;
 
     if !output.status.success() {
-        // If HEAD doesn't exist (empty repo), try without HEAD
-        let output = Command::new("git")
-            .args(["diff", "--stat"])
-            .current_dir(worktree_path)
-            .output()
-            .context("failed to run git diff --stat")?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Only retry without HEAD if the error indicates missing HEAD (empty repo / unborn branch)
+        if stderr.contains("unknown revision") || stderr.contains("bad revision") {
+            let output = Command::new("git")
+                .args(["diff", "--stat"])
+                .current_dir(worktree_path)
+                .output()
+                .context("failed to run git diff --stat")?;
 
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        return Ok(parse_stat_summary(&raw));
+            let raw = String::from_utf8_lossy(&output.stdout).to_string();
+            return Ok(parse_stat_summary(&raw));
+        }
+        // For other errors (permissions, corruption), propagate
+        anyhow::bail!("git diff --stat HEAD failed: {}", stderr.trim());
     }
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();
@@ -70,42 +75,48 @@ fn parse_stat_summary(raw: &str) -> DiffStat {
     stat
 }
 
-/// Get the full diff for a worktree (uncommitted changes vs HEAD).
-pub fn diff_full(worktree_path: &Path) -> Result<String> {
+fn run_git_checked(worktree_path: &Path, args: &[&str], context: &str) -> Result<String> {
     let output = Command::new("git")
-        .args(["diff", "HEAD"])
+        .args(args)
         .current_dir(worktree_path)
         .output()
-        .context("failed to run git diff")?;
+        .with_context(|| format!("failed to run {}", context))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{} failed: {}", context, stderr.trim());
+    }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Get the full diff for a worktree (uncommitted changes vs HEAD).
+pub fn diff_full(worktree_path: &Path) -> Result<String> {
+    run_git_checked(worktree_path, &["diff", "HEAD"], "git diff HEAD")
 }
 
 /// Get the diff between a base commit and the worktree's HEAD (committed changes).
 pub fn diff_commits(worktree_path: &Path, base_commit: &str) -> Result<String> {
-    let output = Command::new("git")
-        .args(["diff", base_commit, "HEAD"])
-        .current_dir(worktree_path)
-        .output()
-        .context("failed to run git diff")?;
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_git_checked(
+        worktree_path,
+        &["diff", base_commit, "HEAD"],
+        "git diff <base> HEAD",
+    )
 }
 
 /// Get `git log --oneline` between base and HEAD.
 pub fn log_oneline(worktree_path: &Path, base_commit: &str) -> Result<String> {
-    let output = Command::new("git")
-        .args(["log", "--oneline", &format!("{base_commit}..HEAD")])
-        .current_dir(worktree_path)
-        .output()
-        .context("failed to run git log")?;
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_git_checked(
+        worktree_path,
+        &["log", "--oneline", &format!("{base_commit}..HEAD")],
+        "git log --oneline",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_parse_stat_summary() {
@@ -120,5 +131,47 @@ mod tests {
     fn test_parse_stat_empty() {
         let stat = parse_stat_summary("");
         assert_eq!(stat.files_changed, 0);
+    }
+
+    #[test]
+    fn diff_full_returns_error_outside_git_repo() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let err = diff_full(tmp.path()).expect_err("expected git diff outside repo to fail");
+        assert!(err.to_string().contains("git diff HEAD failed"));
+    }
+
+    #[test]
+    fn diff_commits_returns_error_for_invalid_base_commit() {
+        let tmp = TempDir::new().expect("create temp dir");
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git init should run");
+
+        std::fs::write(tmp.path().join("README.md"), "hello\n").expect("write README");
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git add should run");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git commit should run");
+
+        let err = diff_commits(tmp.path(), "deadbeef")
+            .expect_err("expected diff_commits with invalid commit to fail");
+        assert!(err.to_string().contains("git diff <base> HEAD failed"));
     }
 }

@@ -64,12 +64,18 @@ pub fn kill_pane(pane_id: &str) -> Result<()> {
 }
 
 /// Check if a pane is still alive by querying its pane_id.
+/// Returns false if the pane doesn't exist or if tmux itself is not running.
 pub fn pane_exists(pane_id: &str) -> bool {
-    Command::new("tmux")
+    match Command::new("tmux")
         .args(["display-message", "-t", pane_id, "-p", "#{pane_id}"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    {
+        Ok(o) => o.status.success(),
+        Err(e) => {
+            eprintln!("cwt: tmux query failed for pane {}: {}", pane_id, e);
+            false
+        }
+    }
 }
 
 /// Get the current command running in a pane.
@@ -161,6 +167,7 @@ fn shell_escape(s: &str) -> String {
 }
 
 /// Build the shell command that will be executed in the tmux window.
+#[cfg(test)]
 fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
     format!("cd {} && {}", shell_escape(worktree_path), command)
 }

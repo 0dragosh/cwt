@@ -30,7 +30,11 @@ impl Manager {
     pub fn load_state(&self) -> Result<State> {
         let mut state = self.store.load(&self.repo_root)?;
         let git_wts = git::commands::worktree_list(&self.repo_root)?;
-        self.store.reconcile(&mut state, &git_wts);
+        let changed = self.store.reconcile(&mut state, &git_wts);
+        // Persist reconciliation so other instances see consistent state
+        if changed {
+            let _ = self.store.save(&state);
+        }
         Ok(state)
     }
 
@@ -74,27 +78,35 @@ impl Manager {
             false
         };
 
-        // Create the worktree
-        git::commands::worktree_add(&self.repo_root, &wt_abs_path, &branch_name, base_branch)
-            .with_context(|| format!("failed to create worktree '{}'", name))?;
+        // Create the worktree — if this fails and we stashed, restore the stash first
+        if let Err(e) =
+            git::commands::worktree_add(&self.repo_root, &wt_abs_path, &branch_name, base_branch)
+        {
+            if stashed {
+                let _ = git::commands::stash_pop(&self.repo_root);
+            }
+            return Err(e).with_context(|| format!("failed to create worktree '{}'", name));
+        }
 
         // Apply stashed changes to the new worktree
         if stashed {
-            // Apply stash to worktree (best-effort)
-            let stash_diff = std::process::Command::new("git")
+            // Apply stash to worktree (best-effort) — never use `?` here
+            // because stash_pop must always run to restore the original state
+            let patch_result = std::process::Command::new("git")
                 .args(["stash", "show", "-p"])
                 .current_dir(&self.repo_root)
-                .output()
-                .context("failed to get stash diff")?;
+                .output();
 
-            if stash_diff.status.success() {
-                let patch = String::from_utf8_lossy(&stash_diff.stdout);
-                if !patch.is_empty() {
-                    let _ = git::commands::apply_patch(&wt_abs_path, &patch);
+            if let Ok(stash_diff) = patch_result {
+                if stash_diff.status.success() {
+                    let patch = String::from_utf8_lossy(&stash_diff.stdout);
+                    if !patch.is_empty() {
+                        let _ = git::commands::apply_patch(&wt_abs_path, &patch);
+                    }
                 }
             }
 
-            // Pop stash in original dir to restore it
+            // Pop stash in original dir to restore it — must always run
             let _ = git::commands::stash_pop(&self.repo_root);
         }
 
@@ -220,7 +232,12 @@ impl Manager {
         let to_prune = ephemerals.len() - max;
         let mut prune_names = Vec::new();
 
-        for wt in ephemerals.into_iter().take(to_prune) {
+        // Iterate all ephemerals (not just to_prune count) since some may be skipped
+        for wt in ephemerals.into_iter() {
+            if prune_names.len() >= to_prune {
+                break;
+            }
+
             let wt_abs_path = if wt.path.is_relative() {
                 self.repo_root.join(&wt.path)
             } else {

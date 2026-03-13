@@ -110,20 +110,35 @@ pub fn fetch_linear_issues(limit: usize) -> Result<Vec<Issue>> {
         limit
     );
 
-    let output = Command::new("curl")
+    // Pass the API key via stdin using -K - to avoid exposing it in process args (ps aux)
+    use std::io::Write;
+    let mut child = Command::new("curl")
         .args([
             "-s",
             "-X",
             "POST",
             "-H",
             "Content-Type: application/json",
-            "-H",
-            &format!("Authorization: {}", api_key),
+            "-K",
+            "-", // Read config from stdin
             "-d",
             &query,
             "https://api.linear.app/graphql",
         ])
-        .output()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("failed to spawn curl for Linear API")?;
+
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = writeln!(stdin, "header = \"Authorization: {}\"", api_key);
+    }
+    // Drop stdin to signal EOF
+    drop(child.stdin.take());
+
+    let output = child
+        .wait_with_output()
         .context("failed to call Linear API")?;
 
     if !output.status.success() {
@@ -199,7 +214,17 @@ pub fn import_issues(
             let prompt = build_issue_prompt(issue, source);
             let result =
                 dispatch::dispatch_tasks(manager, std::slice::from_ref(&prompt), base_branch);
-            let dr = result.into_iter().next().unwrap();
+            let dr = match result.into_iter().next() {
+                Some(dr) => dr,
+                None => {
+                    return ImportResult {
+                        issue: issue.clone(),
+                        worktree_name: String::new(),
+                        pane_id: None,
+                        error: Some("dispatch returned no results".to_string()),
+                    };
+                }
+            };
 
             ImportResult {
                 issue: issue.clone(),
@@ -220,9 +245,10 @@ fn build_issue_prompt(issue: &Issue, source: &str) -> String {
     );
 
     if !issue.body.is_empty() {
-        // Truncate very long bodies
-        let body = if issue.body.len() > 2000 {
-            format!("{}...", &issue.body[..2000])
+        // Truncate very long bodies (char-safe to avoid panic on multi-byte chars)
+        let body = if issue.body.chars().count() > 2000 {
+            let truncated: String = issue.body.chars().take(2000).collect();
+            format!("{}...", truncated)
         } else {
             issue.body.clone()
         };

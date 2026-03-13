@@ -32,7 +32,26 @@ pub fn read_transcript_info(project_dir: &Path, msg_count: usize) -> Result<Tran
         None => return Ok(TranscriptInfo::default()),
     };
 
-    let content = std::fs::read_to_string(&latest)?;
+    // Read transcript with a size limit to avoid OOM on very large files
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+    let file = std::fs::File::open(&latest)?;
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB limit for reading
+
+    let content = if file_len > MAX_READ_BYTES {
+        // For large files, read only the last MAX_READ_BYTES
+        let mut reader = BufReader::new(&file);
+        reader.seek(SeekFrom::End(-(MAX_READ_BYTES as i64)))?;
+        let mut tail_content = String::new();
+        reader.read_to_string(&mut tail_content)?;
+        // Skip the first partial line (we may have seeked into the middle of a line)
+        if let Some(pos) = tail_content.find('\n') {
+            tail_content = tail_content[pos + 1..].to_string();
+        }
+        tail_content
+    } else {
+        std::fs::read_to_string(&latest)?
+    };
     let lines: Vec<&str> = content.lines().collect();
 
     let mut assistant_messages = Vec::new();
@@ -199,12 +218,13 @@ fn accumulate_usage(value: &serde_json::Value, usage: &mut TranscriptUsage) {
     }
 }
 
-/// Truncate a message to max_chars, appending "..." if truncated.
+/// Truncate a message to max_chars (character count, not bytes), appending "..." if truncated.
 fn truncate_message(msg: &str, max_chars: usize) -> String {
-    if msg.len() <= max_chars {
+    let char_count = msg.chars().count();
+    if char_count <= max_chars {
         msg.to_string()
     } else {
-        let mut truncated = msg[..max_chars].to_string();
+        let mut truncated: String = msg.chars().take(max_chars).collect();
         truncated.push_str("...");
         truncated
     }

@@ -153,15 +153,19 @@ impl RemoteHost {
 
     /// Ensure the worktree directory exists on the remote host.
     pub fn ensure_worktree_dir(&self) -> Result<()> {
-        self.ssh_exec(&format!("mkdir -p '{}'", self.worktree_dir))?;
+        self.ssh_exec(&format!("mkdir -p {}", ssh_shell_quote(&self.worktree_dir)))?;
         Ok(())
     }
 
     /// Run a git command in the remote worktree directory.
     pub fn git_remote(&self, repo_name: &str, args: &[&str]) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
-        let git_args = args.join(" ");
-        let command = format!("cd '{}' && git {}", repo_path, git_args);
+        let git_args: Vec<String> = args.iter().map(|a| ssh_shell_quote(a)).collect();
+        let command = format!(
+            "cd {} && git {}",
+            ssh_shell_quote(&repo_path),
+            git_args.join(" ")
+        );
         self.ssh_exec(&command)
     }
 
@@ -170,13 +174,16 @@ impl RemoteHost {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
 
         // Check if repo already exists
-        let (_, _, exists) = self.ssh_exec_fallible(&format!("test -d '{}/.git'", repo_path))?;
+        let (_, _, exists) =
+            self.ssh_exec_fallible(&format!("test -d {}/.git", ssh_shell_quote(&repo_path)))?;
 
         if !exists {
             self.ensure_worktree_dir()?;
             self.ssh_exec(&format!(
-                "cd '{}' && git clone '{}' '{}'",
-                self.worktree_dir, repo_url, repo_name
+                "cd {} && git clone {} {}",
+                ssh_shell_quote(&self.worktree_dir),
+                ssh_shell_quote(repo_url),
+                ssh_shell_quote(repo_name)
             ))
             .with_context(|| {
                 format!(
@@ -205,8 +212,11 @@ impl RemoteHost {
 
         // Create the worktree
         let cmd = format!(
-            "cd '{}' && git worktree add '{}' -b '{}' '{}'",
-            repo_path, wt_path, branch_name, base_branch
+            "cd {} && git worktree add {} -b {} {}",
+            ssh_shell_quote(&repo_path),
+            ssh_shell_quote(&wt_path),
+            ssh_shell_quote(branch_name),
+            ssh_shell_quote(base_branch)
         );
         self.ssh_exec(&cmd).with_context(|| {
             format!(
@@ -224,8 +234,9 @@ impl RemoteHost {
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
 
         let cmd = format!(
-            "cd '{}' && git worktree remove --force '{}'",
-            repo_path, wt_path
+            "cd {} && git worktree remove --force {}",
+            ssh_shell_quote(&repo_path),
+            ssh_shell_quote(&wt_path)
         );
         self.ssh_exec(&cmd).with_context(|| {
             format!(
@@ -247,7 +258,7 @@ impl RemoteHost {
     pub fn diff_stat(&self, repo_name: &str, worktree_name: &str) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
-        let cmd = format!("cd '{}' && git diff --stat", wt_path);
+        let cmd = format!("cd {} && git diff --stat", ssh_shell_quote(&wt_path));
         self.ssh_exec(&cmd)
     }
 
@@ -255,7 +266,7 @@ impl RemoteHost {
     pub fn diff_full(&self, repo_name: &str, worktree_name: &str) -> Result<String> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
-        let cmd = format!("cd '{}' && git diff", wt_path);
+        let cmd = format!("cd {} && git diff", ssh_shell_quote(&wt_path));
         self.ssh_exec(&cmd)
     }
 
@@ -263,10 +274,16 @@ impl RemoteHost {
     pub fn is_dirty(&self, repo_name: &str, worktree_name: &str) -> Result<bool> {
         let repo_path = format!("{}/{}", self.worktree_dir, repo_name);
         let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
-        let cmd = format!("cd '{}' && git status --porcelain", wt_path);
+        let cmd = format!("cd {} && git status --porcelain", ssh_shell_quote(&wt_path));
         let (stdout, _, _) = self.ssh_exec_fallible(&cmd)?;
         Ok(!stdout.trim().is_empty())
     }
+}
+
+/// Shell-quote a string for safe embedding in SSH commands.
+/// Wraps in single quotes and escapes any embedded single quotes.
+fn ssh_shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Network status for a remote host.

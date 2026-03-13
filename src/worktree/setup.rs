@@ -29,15 +29,30 @@ pub fn run_setup_script(worktree_path: &Path, config: &SetupConfig) -> Option<Re
 }
 
 fn execute_script(worktree_path: &Path, script: &str, timeout_secs: u64) -> Result<SetupResult> {
-    // Resolve script path relative to worktree
+    // Resolve script path relative to worktree and validate it doesn't escape
     let script_path = if Path::new(script).is_absolute() {
-        script.to_string()
+        std::path::PathBuf::from(script)
     } else {
-        worktree_path.join(script).to_string_lossy().to_string()
+        let joined = worktree_path.join(script);
+        // Canonicalize to resolve ".." and validate the path stays within worktree
+        let canonical = joined.canonicalize().unwrap_or(joined.clone());
+        let wt_canonical = worktree_path
+            .canonicalize()
+            .unwrap_or(worktree_path.to_path_buf());
+        if !canonical.starts_with(&wt_canonical) {
+            anyhow::bail!(
+                "setup script path '{}' resolves outside the worktree directory",
+                script
+            );
+        }
+        canonical
     };
 
+    // Use Command::new("sh") with the script path as an argument (not via -c)
+    // to avoid command injection while preserving compatibility with scripts
+    // that lack a shebang or executable permission.
     let mut child = Command::new("sh")
-        .args(["-c", &script_path])
+        .arg(&script_path)
         .current_dir(worktree_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

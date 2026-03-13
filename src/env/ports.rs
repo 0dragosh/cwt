@@ -185,6 +185,9 @@ fn find_available_port(base: u16, used: &[u16]) -> Result<u16> {
 }
 
 /// Check if a TCP port is free by attempting to bind to it.
+/// Note: This is inherently racy (TOCTOU) — the port may be claimed between
+/// the check and the actual bind by the consumer. Callers should handle
+/// bind failures gracefully.
 fn is_port_free(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }

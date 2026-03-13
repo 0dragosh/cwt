@@ -98,12 +98,20 @@ pub fn render(
         }
     }
 
+    // Clamp meta_height so the diff section always gets at least a few lines
+    let min_detail_height = 5u16;
+    let separator_height = 1u16;
+    let max_meta = inner
+        .height
+        .saturating_sub(min_detail_height + separator_height);
+    let clamped_meta_height = meta_height.min(max_meta);
+
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
-            Constraint::Length(meta_height),
-            Constraint::Length(1), // separator
-            Constraint::Min(5),    // diff stat / last message
+            Constraint::Length(clamped_meta_height),
+            Constraint::Length(separator_height),
+            Constraint::Min(min_detail_height),
         ])
         .split(inner);
 
@@ -414,11 +422,17 @@ fn format_tokens(count: u64) -> String {
     }
 }
 
-/// Truncate a string to max_len, appending ".." if truncated.
+/// Truncate a string to max_len characters, appending ".." if truncated.
+/// Uses char boundaries to avoid panics on multi-byte characters.
 fn truncate_str(s: &str, max_len: usize) -> &str {
     if s.len() <= max_len {
         s
     } else {
-        &s[..max_len]
+        // Find a valid char boundary at or before max_len
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
     }
 }

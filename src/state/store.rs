@@ -50,13 +50,26 @@ impl StateStore {
     }
 
     /// Load state from disk, or create a new one if it doesn't exist.
+    /// If the state file is corrupted, backs it up and starts fresh.
     pub fn load(&self, repo_root: &Path) -> Result<State> {
         if self.path.exists() {
             let content = std::fs::read_to_string(&self.path)
                 .with_context(|| format!("failed to read {}", self.path.display()))?;
-            let state: State = serde_json::from_str(&content)
-                .with_context(|| format!("failed to parse {}", self.path.display()))?;
-            Ok(state)
+            match serde_json::from_str::<State>(&content) {
+                Ok(state) => Ok(state),
+                Err(e) => {
+                    // Back up the corrupted file so the user can recover manually
+                    let backup_path = self.path.with_extension("json.corrupt");
+                    let _ = std::fs::copy(&self.path, &backup_path);
+                    eprintln!(
+                        "warning: {} is corrupted ({}), backed up to {} and starting fresh",
+                        self.path.display(),
+                        e,
+                        backup_path.display()
+                    );
+                    Ok(State::new(repo_root.to_path_buf()))
+                }
+            }
         } else {
             Ok(State::new(repo_root.to_path_buf()))
         }
@@ -79,13 +92,16 @@ impl StateStore {
     /// Merge state with actual git worktree list to handle drift.
     /// Removes state entries for worktrees that no longer exist on disk,
     /// but does NOT add entries for worktrees not managed by cwt.
+    /// Returns true if any entries were removed (state was modified).
     pub fn reconcile(
         &self,
         state: &mut State,
         git_worktrees: &[crate::git::commands::GitWorktree],
-    ) {
+    ) -> bool {
         let git_paths: std::collections::HashSet<PathBuf> =
             git_worktrees.iter().map(|w| w.path.clone()).collect();
+
+        let before_count = state.worktrees.len();
 
         // Remove entries whose paths no longer exist in git worktree list
         // Note: remote worktrees don't have local git paths, so always retain them
@@ -101,5 +117,7 @@ impl StateStore {
             };
             git_paths.contains(&abs_path)
         });
+
+        state.worktrees.len() != before_count
     }
 }

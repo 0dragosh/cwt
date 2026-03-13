@@ -6,6 +6,7 @@ use crate::ship::pr::CiStatus;
 
 /// Fetch the CI (GitHub Actions) status for a branch.
 /// Uses `gh run list` to check the latest workflow run status.
+/// Includes headSha to verify the run belongs to the current HEAD commit.
 pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
     let output = Command::new("gh")
         .args([
@@ -16,7 +17,7 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
             "--limit",
             "1",
             "--json",
-            "status,conclusion",
+            "status,conclusion,headSha",
         ])
         .current_dir(repo_path)
         .output();
@@ -35,6 +36,25 @@ pub fn fetch_ci_status(repo_path: &Path, branch: &str) -> CiStatus {
     let Some(run) = json.first() else {
         return CiStatus::None;
     };
+
+    // Verify the run belongs to the branch tip to avoid showing stale results.
+    // Use `git rev-parse <branch>` instead of HEAD so this works correctly
+    // even when repo_path is the repo root rather than the worktree directory.
+    if let Some(head_sha) = run.get("headSha").and_then(|v| v.as_str()) {
+        let branch_tip = Command::new("git")
+            .args(["rev-parse", branch])
+            .current_dir(repo_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        if let Some(ref tip) = branch_tip {
+            if !tip.is_empty() && head_sha != tip {
+                // CI run is for a different commit — report as stale/none
+                return CiStatus::None;
+            }
+        }
+    }
 
     let status = run.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("");

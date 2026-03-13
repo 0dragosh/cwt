@@ -27,8 +27,16 @@ pub fn broadcast_prompt(worktrees: &[Worktree], prompt: &str) -> Vec<BroadcastRe
                 };
             }
 
+            // Sanitize the prompt: strip control characters that could interfere with tmux.
+            // Newlines are replaced with spaces since they act as Enter keypresses in send-keys.
+            let sanitized_prompt: String = prompt
+                .chars()
+                .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+                .filter(|c| !c.is_control())
+                .collect();
+
             // Send the prompt text to the pane via tmux send-keys
-            match tmux::pane::send_keys(pane_id, prompt) {
+            match tmux::pane::send_keys(pane_id, &sanitized_prompt) {
                 Ok(()) => BroadcastResult {
                     worktree_name: wt.name.clone(),
                     success: true,

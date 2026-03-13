@@ -35,8 +35,28 @@ pub fn save_snapshot(worktree: &Worktree, repo_root: &Path) -> Result<SnapshotEn
     let log = diff::log_oneline(&wt_abs_path, &worktree.base_commit)?;
 
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
-    let patch_filename = format!("{}-{}.patch", worktree.name, timestamp);
+    // Sanitize worktree name to prevent path traversal (e.g., "../../etc/cron.d/evil")
+    let safe_name: String = worktree
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let patch_filename = format!("{}-{}.patch", safe_name, timestamp);
     let patch_path = dir.join(&patch_filename);
+
+    // Verify the path stays within the snapshot directory
+    if !patch_path.starts_with(&dir) {
+        anyhow::bail!(
+            "snapshot path '{}' escapes snapshot directory",
+            patch_path.display()
+        );
+    }
 
     // Write combined patch: committed changes + uncommitted changes
     let mut content = String::new();
@@ -63,8 +83,12 @@ pub fn save_snapshot(worktree: &Worktree, repo_root: &Path) -> Result<SnapshotEn
         content.push_str(&uncommitted_diff);
     }
 
-    std::fs::write(&patch_path, &content)
-        .with_context(|| format!("failed to write snapshot {}", patch_path.display()))?;
+    // Write to a temp file then rename for atomicity (prevents truncated files on crash)
+    let temp_path = patch_path.with_extension("patch.tmp");
+    std::fs::write(&temp_path, &content)
+        .with_context(|| format!("failed to write snapshot temp file {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &patch_path)
+        .with_context(|| format!("failed to rename snapshot to {}", patch_path.display()))?;
 
     Ok(SnapshotEntry {
         name: worktree.name.clone(),

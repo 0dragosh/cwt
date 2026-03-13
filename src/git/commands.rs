@@ -177,10 +177,15 @@ pub fn has_unpushed_commits(repo_root: &Path, branch: &str) -> Result<bool> {
 
 /// Stash changes in the given directory. Returns true if something was stashed.
 pub fn stash(dir: &Path) -> Result<bool> {
-    let before = git(dir, &["stash", "list"])?;
+    // Check if there's anything to stash first to avoid false positives
+    // from concurrent stash operations by other processes
+    let is_dirty = is_dirty(dir)?;
+    if !is_dirty {
+        return Ok(false);
+    }
     git(dir, &["stash", "push", "-u", "-m", "cwt: carry changes"])?;
-    let after = git(dir, &["stash", "list"])?;
-    Ok(before != after)
+    // If the command succeeded and we had changes, we stashed something
+    Ok(true)
 }
 
 /// Pop the top stash entry.

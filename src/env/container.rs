@@ -388,8 +388,17 @@ pub fn setup_container(
         anyhow::bail!("no container runtime found (install podman or docker)");
     }
 
-    let image_tag = format!("cwt-{}", worktree_name);
-    let container_name = format!("cwt-{}", worktree_name);
+    // Include a hash of the worktree path to avoid collisions between repos
+    // that have worktrees with the same name
+    let path_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        worktree_path.hash(&mut hasher);
+        format!("{:08x}", hasher.finish() & 0xFFFF_FFFF)
+    };
+    let image_tag = format!("cwt-{}-{}", worktree_name, path_hash);
+    let container_name = format!("cwt-{}-{}", worktree_name, path_hash);
 
     // Build the image
     build_image(&runtime, worktree_path, containerfile, &image_tag)?;
