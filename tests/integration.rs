@@ -102,6 +102,19 @@ fn run_cwt(repo_root: &Path, args: &[&str]) -> (String, String, bool) {
     run_cwt_with_home(repo_root, args, test_home())
 }
 
+/// Run `cwt <args>` and fail the test immediately if it exits non-zero.
+fn run_cwt_ok(repo_root: &Path, args: &[&str]) -> (String, String) {
+    let (stdout, stderr, ok) = run_cwt(repo_root, args);
+    assert!(
+        ok,
+        "cwt {} failed in {}:\n{}",
+        args.join(" "),
+        repo_root.display(),
+        stderr
+    );
+    (stdout, stderr)
+}
+
 /// Run `cwt <args>` with a custom HOME directory.
 /// Returns (stdout, stderr, success).
 fn run_cwt_with_home(repo_root: &Path, args: &[&str], home: &Path) -> (String, String, bool) {
@@ -119,6 +132,20 @@ fn run_cwt_with_home(repo_root: &Path, args: &[&str], home: &Path) -> (String, S
         String::from_utf8_lossy(&out.stderr).to_string(),
         out.status.success(),
     )
+}
+
+/// Run `cwt <args>` with a custom HOME and fail the test immediately if it exits non-zero.
+fn run_cwt_with_home_ok(repo_root: &Path, args: &[&str], home: &Path) -> (String, String) {
+    let (stdout, stderr, ok) = run_cwt_with_home(repo_root, args, home);
+    assert!(
+        ok,
+        "cwt {} failed in {} with HOME={}:\n{}",
+        args.join(" "),
+        repo_root.display(),
+        home.display(),
+        stderr
+    );
+    (stdout, stderr)
 }
 
 /// Locate the cwt binary. Prefers the result/bin path from a nix build,
@@ -208,8 +235,8 @@ fn test_list_worktrees() {
     let (_tmp, root) = make_test_repo();
 
     // Create two worktrees
-    run_cwt(&root, &["create", "wt-alpha", "--base", "main"]);
-    run_cwt(&root, &["create", "wt-beta", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "wt-alpha", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "wt-beta", "--base", "main"]);
 
     let (stdout, _stderr, ok) = run_cwt(&root, &["list"]);
     assert!(ok, "cwt list failed: {_stderr}");
@@ -231,7 +258,7 @@ fn test_list_empty() {
 #[test]
 fn test_promote_worktree() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "promo-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "promo-wt", "--base", "main"]);
 
     // Should be ephemeral initially
     let state = read_state(&root);
@@ -258,7 +285,7 @@ fn test_delete_worktree_saves_snapshot() {
     let (_tmp, root) = make_test_repo();
 
     // Create and then make a change in the worktree
-    run_cwt(&root, &["create", "snap-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "snap-wt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/snap-wt");
     std::fs::write(wt_path.join("newfile.txt"), "hello\n").unwrap();
 
@@ -292,7 +319,7 @@ fn test_delete_worktree_saves_snapshot() {
 fn test_state_persisted_across_commands() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["create", "persist-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "persist-wt", "--base", "main"]);
 
     // State file should exist
     let state_path = root.join(".cwt/state.json");
@@ -307,7 +334,7 @@ fn test_state_persisted_across_commands() {
 #[test]
 fn test_state_version_field() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "v-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "v-wt", "--base", "main"]);
 
     let state = read_state(&root);
     assert_eq!(state["version"].as_u64().unwrap(), 1);
@@ -316,7 +343,7 @@ fn test_state_version_field() {
 #[test]
 fn test_state_worktree_fields() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "fields-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "fields-wt", "--base", "main"]);
 
     let state = read_state(&root);
     let wt = &state["worktrees"]["fields-wt"];
@@ -337,7 +364,7 @@ fn test_state_worktree_fields() {
 #[test]
 fn test_gc_nothing_to_prune() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "gc-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "gc-wt", "--base", "main"]);
 
     let (stdout, _stderr, ok) = run_cwt(&root, &["gc"]);
     assert!(ok);
@@ -368,7 +395,7 @@ fn test_gc_dry_run_and_execute() {
     // Create 4 ephemeral worktrees (exceeds limit of 2)
     for i in 0..4 {
         let name = format!("gc-wt-{i}");
-        run_cwt(&root, &["create", &name, "--base", "main"]);
+        run_cwt_ok(&root, &["create", &name, "--base", "main"]);
         // Push the branch so it has an upstream (GC skips branches without upstream)
         let branch = format!("wt/{name}");
         run_git(&root, &["push", "origin", &branch]);
@@ -412,7 +439,7 @@ fn test_handoff_worktree_to_local() {
     let (_tmp, root) = make_test_repo();
 
     // Create worktree and add a tracked file change in it
-    run_cwt(&root, &["create", "handoff-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "handoff-wt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/handoff-wt");
 
     // Modify an existing tracked file so `git diff HEAD` picks it up
@@ -465,7 +492,7 @@ fn test_handoff_local_to_worktree() {
     let (_tmp, root) = make_test_repo();
 
     // Create worktree
-    run_cwt(&root, &["create", "handoff-lt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "handoff-lt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/handoff-lt");
 
     // Add a file in local (but don't commit)
@@ -552,7 +579,7 @@ fn test_hooks_install_creates_scripts() {
 fn test_hooks_install_patches_settings_json() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
 
     let settings_path = root.join(".claude/settings.json");
     assert!(settings_path.exists(), "settings.json should be created");
@@ -580,7 +607,7 @@ fn test_hooks_uninstall_removes_scripts() {
     let (_tmp, root) = make_test_repo();
 
     // Install first
-    run_cwt(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
     assert!(root.join(".cwt/hooks/cwt-stop.sh").exists());
 
     // Uninstall
@@ -596,8 +623,8 @@ fn test_hooks_uninstall_removes_scripts() {
 fn test_hooks_uninstall_cleans_settings_json() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["hooks", "install"]);
-    run_cwt(&root, &["hooks", "uninstall"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "uninstall"]);
 
     let content = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
     let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -617,8 +644,8 @@ fn test_hooks_uninstall_cleans_settings_json() {
 fn test_hooks_install_idempotent() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["hooks", "install"]);
-    run_cwt(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
 
     let content = std::fs::read_to_string(root.join(".claude/settings.json")).unwrap();
     let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -642,7 +669,7 @@ fn test_hooks_status() {
     assert!(stdout.contains("not installed") || stdout.contains("inactive"));
 
     // After install
-    run_cwt(&root, &["hooks", "install"]);
+    run_cwt_ok(&root, &["hooks", "install"]);
     let (stdout, _stderr, ok) = run_cwt(&root, &["hooks", "status"]);
     assert!(ok);
     assert!(stdout.contains("script(s)"));
@@ -696,7 +723,7 @@ max_ephemeral = 3
 fn test_create_duplicate_name_fails() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["create", "dup-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "dup-wt", "--base", "main"]);
 
     let (_stdout, stderr, ok) = run_cwt(&root, &["create", "dup-wt", "--base", "main"]);
     assert!(!ok, "duplicate create should fail");
@@ -778,7 +805,7 @@ fn test_create_with_carry_changes() {
 #[test]
 fn test_branch_naming_convention() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "feat-auth", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "feat-auth", "--base", "main"]);
 
     // Branch should be wt/<name>
     let state = read_state(&root);
@@ -802,8 +829,8 @@ fn test_branch_naming_convention() {
 #[test]
 fn test_delete_removes_branch() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "del-branch", "--base", "main"]);
-    run_cwt(&root, &["delete", "del-branch"]);
+    run_cwt_ok(&root, &["create", "del-branch", "--base", "main"]);
+    run_cwt_ok(&root, &["delete", "del-branch"]);
 
     // Branch should be gone
     let out = Command::new("git")
@@ -828,7 +855,7 @@ fn test_state_reconciliation_after_manual_removal() {
     let (_tmp, root) = make_test_repo();
 
     // Create a worktree via cwt
-    run_cwt(&root, &["create", "recon-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "recon-wt", "--base", "main"]);
 
     // Manually remove it via git (bypassing cwt)
     let wt_path = root.join(".claude/worktrees/recon-wt");
@@ -855,16 +882,11 @@ fn test_status_no_repos() {
     let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    let (stdout, _stderr, ok) = run_cwt_with_home(&root, &["status"], home.path());
-    // With no repos registered, it should say so or show empty
-    assert!(ok || _stderr.contains("No repos registered"));
-    if ok {
-        // Could show "0 repo(s)" or "No repos registered"
-        assert!(
-            stdout.contains("repo") || stdout.contains("No repos"),
-            "should mention repos: {stdout}"
-        );
-    }
+    let (stdout, _stderr) = run_cwt_with_home_ok(&root, &["status"], home.path());
+    assert!(
+        stdout.contains("No repos registered"),
+        "should explain the empty forest state: {stdout}"
+    );
 }
 
 #[test]
@@ -872,9 +894,8 @@ fn test_add_repo() {
     let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    let (stdout, _stderr, ok) =
-        run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
-    assert!(ok, "add-repo failed: {_stderr}");
+    let (stdout, _stderr) =
+        run_cwt_with_home_ok(&root, &["add-repo", root.to_str().unwrap()], home.path());
     assert!(
         stdout.contains("Added repo") || stdout.contains("already registered"),
         "should confirm add: {stdout}"
@@ -886,12 +907,11 @@ fn test_add_repo_duplicate() {
     let home = make_isolated_home();
     let (_tmp, root) = make_test_repo();
 
-    run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
+    run_cwt_with_home_ok(&root, &["add-repo", root.to_str().unwrap()], home.path());
 
     // Second add should indicate already registered
-    let (stdout, _stderr, ok) =
-        run_cwt_with_home(&root, &["add-repo", root.to_str().unwrap()], home.path());
-    assert!(ok);
+    let (stdout, _stderr) =
+        run_cwt_with_home_ok(&root, &["add-repo", root.to_str().unwrap()], home.path());
     assert!(
         stdout.contains("already registered"),
         "should say already registered: {stdout}"
@@ -906,7 +926,7 @@ fn test_add_repo_duplicate() {
 fn test_snapshot_contains_changes() {
     let (_tmp, root) = make_test_repo();
 
-    run_cwt(&root, &["create", "snap-content", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "snap-content", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/snap-content");
 
     // Make a committed change
@@ -914,11 +934,15 @@ fn test_snapshot_contains_changes() {
     run_git(&wt_path, &["add", "."]);
     run_git(&wt_path, &["commit", "-m", "add committed file"]);
 
-    // Make an uncommitted change
-    std::fs::write(wt_path.join("uncommitted.txt"), "uncommitted change\n").unwrap();
+    // Make an uncommitted tracked change
+    std::fs::write(
+        wt_path.join("README.md"),
+        "# test repo\nmodified but uncommitted\n",
+    )
+    .unwrap();
 
     // Delete (triggers snapshot)
-    run_cwt(&root, &["delete", "snap-content"]);
+    run_cwt_ok(&root, &["delete", "snap-content"]);
 
     // Read the snapshot
     let state = read_state(&root);
@@ -928,11 +952,17 @@ fn test_snapshot_contains_changes() {
     // Should have metadata header
     assert!(patch_content.contains("# cwt snapshot: snap-content"));
     assert!(patch_content.contains("# base branch: main"));
+    assert!(patch_content.contains("### Committed changes ###"));
+    assert!(patch_content.contains("### Uncommitted changes ###"));
 
-    // Should have the committed changes
+    // Should have both committed and uncommitted changes
     assert!(
         patch_content.contains("committed.txt"),
         "snapshot should contain committed changes"
+    );
+    assert!(
+        patch_content.contains("modified but uncommitted"),
+        "snapshot should contain uncommitted changes"
     );
 }
 
@@ -954,22 +984,34 @@ fn test_gc_skips_dirty_worktrees() {
     .unwrap();
 
     // Create 2 worktrees
-    run_cwt(&root, &["create", "gc-clean", "--base", "main"]);
-    run_cwt(&root, &["create", "gc-dirty", "--base", "main"]);
+    run_git(&root, &["remote", "add", "origin", root.to_str().unwrap()]);
+    run_git(&root, &["fetch", "origin"]);
+    run_git(&root, &["push", "origin", "main"]);
+
+    run_cwt_ok(&root, &["create", "gc-clean", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "gc-dirty", "--base", "main"]);
+
+    for name in ["gc-clean", "gc-dirty"] {
+        let branch = format!("wt/{name}");
+        run_git(&root, &["push", "origin", &branch]);
+        let wt_path = root.join(format!(".claude/worktrees/{name}"));
+        run_git(
+            &wt_path,
+            &["branch", "--set-upstream-to", &format!("origin/{branch}")],
+        );
+    }
 
     // Make the second one dirty
     let dirty_path = root.join(".claude/worktrees/gc-dirty");
     std::fs::write(dirty_path.join("dirty.txt"), "dirty\n").unwrap();
 
     // GC should skip the dirty one
-    let (stdout, _stderr, _ok) = run_cwt(&root, &["gc"]);
-    if stdout.contains("Worktrees to prune") {
-        // gc-dirty should NOT be in the prune list
-        assert!(
-            !stdout.contains("gc-dirty"),
-            "dirty worktree should be skipped by GC"
-        );
-    }
+    let (stdout, _stderr, ok) = run_cwt(&root, &["gc"]);
+    assert!(ok, "gc preview failed: {_stderr}");
+    assert!(stdout.contains("Worktrees to prune (1):"));
+    assert!(stdout.contains("gc-clean"));
+    assert!(!stdout.contains("gc-dirty"));
+    assert!(stdout.contains("Dry run"));
 }
 
 // ===========================================================================
@@ -977,24 +1019,24 @@ fn test_gc_skips_dirty_worktrees() {
 // ===========================================================================
 
 #[test]
-fn test_delete_cleans_up_directory_on_git_worktree_remove_failure() {
+fn test_delete_removes_worktree_directory_and_state() {
     let (_tmp, root) = make_test_repo();
 
     // Create a worktree via cwt
-    run_cwt(&root, &["create", "partial-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "partial-wt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/partial-wt");
     assert!(wt_path.exists(), "worktree dir should exist after create");
 
-    // Create a file that might cause issues during removal (simulates
-    // the kind of thing that can cause partial failure)
-    // We test the "git worktree remove succeeded but directory lingers" path
-    // by verifying the normal delete path works cleanly
     let (_stdout, _stderr, ok) = run_cwt(&root, &["delete", "partial-wt"]);
     assert!(ok, "delete should succeed: {_stderr}");
     assert!(
         !wt_path.exists(),
         "worktree dir should be cleaned up after delete"
     );
+
+    let (list_stdout, _, ok) = run_cwt(&root, &["list"]);
+    assert!(ok);
+    assert!(!list_stdout.contains("partial-wt"));
 }
 
 #[test]
@@ -1002,7 +1044,7 @@ fn test_orphan_from_partial_deletion_cleaned_by_audit() {
     let (_tmp, root) = make_test_repo();
 
     // Create a worktree via cwt
-    run_cwt(&root, &["create", "partial-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "partial-wt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/partial-wt");
     assert!(wt_path.exists(), "worktree dir should exist after create");
 
@@ -1049,7 +1091,7 @@ fn test_audit_cleans_orphaned_worktree_dirs() {
     // Create a worktree, then simulate an orphan by:
     // 1. Deleting git worktree metadata
     // 2. Removing the worktree from cwt state
-    run_cwt(&root, &["create", "orphan-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["create", "orphan-wt", "--base", "main"]);
     let wt_path = root.join(".claude/worktrees/orphan-wt");
 
     // Delete git metadata
@@ -1105,8 +1147,8 @@ fn test_audit_cleans_orphaned_worktree_dirs() {
 #[test]
 fn test_promote_already_permanent() {
     let (_tmp, root) = make_test_repo();
-    run_cwt(&root, &["create", "perm-wt", "--base", "main"]);
-    run_cwt(&root, &["promote", "perm-wt"]);
+    run_cwt_ok(&root, &["create", "perm-wt", "--base", "main"]);
+    run_cwt_ok(&root, &["promote", "perm-wt"]);
 
     // Second promote should succeed (or be a no-op)
     let (_stdout, _stderr, ok) = run_cwt(&root, &["promote", "perm-wt"]);
