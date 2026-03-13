@@ -36,6 +36,12 @@ Optional:
 
 ## Installation
 
+### Cargo (from crates.io)
+
+```sh
+cargo install cwt
+```
+
 ### Nix (recommended)
 
 cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64). The Nix package automatically wraps the binary so `git` and `tmux` are always on `PATH`.
