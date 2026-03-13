@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 
 use super::host::RemoteHost;
+use crate::config::model::{PermissionLevel, PermissionsConfig};
 
 /// Launch a Claude Code session on a remote host via SSH + tmux.
 ///
@@ -13,6 +14,8 @@ pub fn launch_remote_session(
     repo_name: &str,
     worktree_name: &str,
     claude_args: &[String],
+    permission: PermissionLevel,
+    permissions: &PermissionsConfig,
 ) -> Result<String> {
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
@@ -22,6 +25,9 @@ pub fn launch_remote_session(
     let mut claude_parts = vec!["claude".to_string()];
     for arg in claude_args {
         claude_parts.push(remote_shell_quote(arg));
+    }
+    for arg in &permissions.get(permission).extra_args {
+        claude_parts.push(arg.clone());
     }
     let claude_cmd = claude_parts.join(" ");
 
@@ -52,6 +58,8 @@ pub fn resume_remote_session(
     worktree_name: &str,
     session_id: &str,
     claude_args: &[String],
+    permission: PermissionLevel,
+    permissions: &PermissionsConfig,
 ) -> Result<String> {
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
@@ -62,6 +70,9 @@ pub fn resume_remote_session(
     claude_parts.push(remote_shell_quote(session_id));
     for arg in claude_args {
         claude_parts.push(remote_shell_quote(arg));
+    }
+    for arg in &permissions.get(permission).extra_args {
+        claude_parts.push(arg.clone());
     }
     let claude_cmd = claude_parts.join(" ");
 

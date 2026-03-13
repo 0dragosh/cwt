@@ -5,6 +5,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::path::Path;
 
+use crate::config::model::PermissionLevel;
+
 /// Three-row layout: top bar + two-panel content + status bar.
 /// Returns (top_bar, list_panel, inspector_panel, status_bar).
 pub fn main_layout(area: Rect) -> (Rect, Rect, Rect, Rect) {
@@ -56,11 +58,22 @@ pub fn render_top_bar(
     repo_root: &Path,
     waiting_count: usize,
     done_count: usize,
+    permission_level: PermissionLevel,
 ) {
-    render_top_bar_with_stats(f, area, repo_root, waiting_count, done_count, None, None);
+    render_top_bar_with_stats(
+        f,
+        area,
+        repo_root,
+        waiting_count,
+        done_count,
+        None,
+        None,
+        permission_level,
+    );
 }
 
 /// Render the top bar with optional aggregate token/cost stats.
+#[allow(clippy::too_many_arguments)]
 pub fn render_top_bar_with_stats(
     f: &mut Frame,
     area: Rect,
@@ -69,6 +82,7 @@ pub fn render_top_bar_with_stats(
     done_count: usize,
     total_tokens: Option<(u64, u64)>,
     total_cost: Option<f64>,
+    permission_level: PermissionLevel,
 ) {
     let project_name = repo_root
         .file_name()
@@ -95,6 +109,23 @@ pub fn render_top_bar_with_stats(
             Style::default().fg(Color::DarkGray),
         ),
     ];
+
+    // Permission level badge
+    {
+        let (badge_fg, badge_bg) = match permission_level {
+            PermissionLevel::Normal => (Color::White, Color::DarkGray),
+            PermissionLevel::Elevated => (Color::Black, Color::Yellow),
+            PermissionLevel::ElevatedUnsandboxed => (Color::White, Color::Red),
+        };
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!(" {} ", permission_level.short_label()),
+            Style::default()
+                .fg(badge_fg)
+                .bg(badge_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     // Add notification badges
     if waiting_count > 0 {

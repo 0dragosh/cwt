@@ -64,6 +64,13 @@ pub fn render(f: &mut Frame, scroll: u16) {
             ],
         ),
         (
+            "Permissions",
+            vec![
+                ("m", "Cycle permission level (Normal/Elevated/Unsandboxed)"),
+                ("M", "Save current permission level as default"),
+            ],
+        ),
+        (
             "General",
             vec![
                 ("?", "Toggle this help"),

@@ -5,7 +5,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 const SHORTCUTS: &str =
-    " {count} worktree(s) | n:new Ent:session h:handoff P:pr S:ship e:shell p:perm d:del g:gc r:restore t:tasks b:bcast ?:help q:quit";
+    " {count} worktree(s) | n:new Ent:session h:handoff P:pr S:ship e:shell p:perm d:del g:gc r:restore t:tasks b:bcast m:mode ?:help q:quit";
 
 /// Render the status bar at the bottom.
 pub fn render(f: &mut Frame, area: Rect, message: &str, worktree_count: usize) {

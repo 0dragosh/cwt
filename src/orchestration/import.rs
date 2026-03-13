@@ -208,12 +208,17 @@ pub fn import_issues(
     base_branch: &str,
     source: &str,
 ) -> Vec<ImportResult> {
+    let permission = manager.config.session.default_permission;
     issues
         .iter()
         .map(|issue| {
             let prompt = build_issue_prompt(issue, source);
-            let result =
-                dispatch::dispatch_tasks(manager, std::slice::from_ref(&prompt), base_branch);
+            let result = dispatch::dispatch_tasks(
+                manager,
+                std::slice::from_ref(&prompt),
+                base_branch,
+                permission,
+            );
             let dr = match result.into_iter().next() {
                 Some(dr) => dr,
                 None => {
