@@ -55,4 +55,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.version }}
-        run: gh workflow run Release --ref "$TAG" -f tag="$TAG"
+        run: gh workflow run Release --ref main -f tag="$TAG"
