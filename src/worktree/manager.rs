@@ -378,8 +378,9 @@ impl Manager {
                     let gitdir = content.trim().trim_start_matches("gitdir: ");
                     if !std::path::Path::new(gitdir).exists() {
                         // Broken pointer — this is an orphan
-                        let _ = std::fs::remove_dir_all(&path);
-                        removed.push(dir_name);
+                        if std::fs::remove_dir_all(&path).is_ok() {
+                            removed.push(dir_name);
+                        }
                     }
                 }
             }
