@@ -164,6 +164,20 @@ impl App {
             }
             self.worktrees = updated;
 
+            // Reconcile port allocations: release ports for worktrees that no longer exist
+            let current_names: std::collections::HashSet<&str> =
+                self.worktrees.iter().map(|wt| wt.name.as_str()).collect();
+            let stale_ports: Vec<String> = self
+                .port_manager
+                .allocations()
+                .keys()
+                .filter(|name| !current_names.contains(name.as_str()))
+                .cloned()
+                .collect();
+            for name in stale_ports {
+                self.port_manager.release(&name);
+            }
+
             // Persist status changes (best-effort)
             if let Ok(mut state) = self.manager.load_state() {
                 for wt in &self.worktrees {
