@@ -973,6 +973,104 @@ fn test_gc_skips_dirty_worktrees() {
 }
 
 // ===========================================================================
+// Partial Deletion / Orphan Cleanup
+// ===========================================================================
+
+#[test]
+fn test_delete_cleans_up_after_partial_git_removal() {
+    let (_tmp, root) = make_test_repo();
+
+    // Create a worktree via cwt
+    run_cwt(&root, &["create", "partial-wt", "--base", "main"]);
+    let wt_path = root.join(".claude/worktrees/partial-wt");
+    assert!(wt_path.exists(), "worktree dir should exist after create");
+
+    // Simulate partial failure: manually delete git worktree metadata
+    // but leave the checkout directory behind
+    let git_wt_meta = root.join(".git/worktrees/partial-wt");
+    assert!(
+        git_wt_meta.exists(),
+        "git worktree metadata should exist at {}",
+        git_wt_meta.display()
+    );
+    std::fs::remove_dir_all(&git_wt_meta).unwrap();
+
+    // Now the checkout dir has a broken .git pointer
+    assert!(wt_path.exists(), "checkout dir should still exist");
+    assert!(
+        wt_path.join(".git").exists(),
+        ".git file should still exist in checkout dir"
+    );
+
+    // cwt delete should handle this gracefully — git worktree remove will
+    // fail (since metadata is gone), but cwt should clean up the directory
+    let (_stdout, _stderr, ok) = run_cwt(&root, &["delete", "partial-wt"]);
+    assert!(ok, "delete should succeed despite partial git state: {_stderr}");
+
+    // Verify the checkout directory is gone
+    assert!(
+        !wt_path.exists(),
+        "orphaned checkout dir should be cleaned up"
+    );
+}
+
+#[test]
+fn test_audit_cleans_orphaned_worktree_dirs() {
+    let (_tmp, root) = make_test_repo();
+
+    // Create a worktree, then simulate an orphan by:
+    // 1. Deleting git worktree metadata
+    // 2. Removing the worktree from cwt state
+    run_cwt(&root, &["create", "orphan-wt", "--base", "main"]);
+    let wt_path = root.join(".claude/worktrees/orphan-wt");
+
+    // Delete git metadata
+    let git_wt_meta = root.join(".git/worktrees/orphan-wt");
+    std::fs::remove_dir_all(&git_wt_meta).unwrap();
+
+    // Remove from state manually (simulates reconcile removing stale entry)
+    let state_path = root.join(".cwt/state.json");
+    let content = std::fs::read_to_string(&state_path).unwrap();
+    let mut state: serde_json::Value = serde_json::from_str(&content).unwrap();
+    state["worktrees"]
+        .as_object_mut()
+        .unwrap()
+        .remove("orphan-wt");
+    std::fs::write(&state_path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+
+    // The orphaned directory should still exist
+    assert!(wt_path.exists(), "orphaned dir should exist before audit");
+
+    // Run any cwt command — list triggers load_state + reconcile.
+    // But audit_worktree_dir is separate. We test it via a create + list
+    // which will trigger reconcile. The orphan should be invisible to cwt
+    // but still on disk. Let's verify list doesn't show it:
+    let (stdout, _stderr, ok) = run_cwt(&root, &["list"]);
+    assert!(ok);
+    assert!(
+        !stdout.contains("orphan-wt"),
+        "orphan should not appear in list"
+    );
+
+    // The orphaned directory should still be on disk (reconcile doesn't clean dirs)
+    // This demonstrates the bug — the orphan lingers
+    assert!(
+        wt_path.exists(),
+        "orphan dir still on disk (the bug this fix addresses)"
+    );
+
+    // Now run `cwt audit` which calls audit_worktree_dir
+    let (_stdout, _stderr, ok) = run_cwt(&root, &["audit"]);
+    assert!(ok, "cwt audit should succeed: {_stderr}");
+
+    // The orphaned directory should now be cleaned up
+    assert!(
+        !wt_path.exists(),
+        "orphaned checkout dir should be removed by audit"
+    );
+}
+
+// ===========================================================================
 // Promote Idempotency
 // ===========================================================================
 

@@ -90,6 +90,8 @@ enum Commands {
         #[arg(short, long, default_value = "main")]
         base: String,
     },
+    /// Scan for and remove orphaned worktree directories
+    Audit,
     /// Import issues from GitHub or Linear and create worktrees
     Import {
         /// Import from GitHub issues
@@ -171,6 +173,7 @@ fn main() -> Result<()> {
         Some(Commands::Promote { name }) => cmd_promote(&manager, &name)?,
         Some(Commands::Gc { execute }) => cmd_gc(&manager, execute)?,
         Some(Commands::Hooks { action }) => cmd_hooks(&repo_root, action)?,
+        Some(Commands::Audit) => cmd_audit(&manager)?,
         Some(Commands::Dispatch { tasks, base }) => cmd_dispatch(&manager, &tasks, &base)?,
         Some(Commands::Import {
             github,
@@ -490,6 +493,19 @@ fn cmd_promote(manager: &Manager, name: &str) -> Result<()> {
         println!("Promoted '{}' to permanent", name);
     } else {
         println!("'{}' is already permanent", name);
+    }
+    Ok(())
+}
+
+fn cmd_audit(manager: &Manager) -> Result<()> {
+    let removed = manager.audit_worktree_dir()?;
+    if removed.is_empty() {
+        println!("No orphaned worktree directories found.");
+    } else {
+        println!("Removed {} orphaned directory(ies):", removed.len());
+        for name in &removed {
+            println!("  - {}", name);
+        }
     }
     Ok(())
 }
