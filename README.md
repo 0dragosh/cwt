@@ -1,7 +1,7 @@
-# cwt — Claude Worktree Manager
+# cwt — Provider (Claude or Codex) Worktree Manager
 
 A terminal UI for running parallel
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions in
+provider (Claude or Codex) sessions in
 isolated git worktrees. Built in Rust, uses tmux for all interactive session
 management, and requires tmux to be installed.
 
@@ -11,17 +11,17 @@ management, and requires tmux to be installed.
 ```
 Worktree (unit of work)
   |-- Branch (auto-created or user-specified)
-  |-- Session (Claude Code instance, 0 or 1 active)
+  |-- Session (provider instance, 0 or 1 active)
   |-- Lifecycle: ephemeral | permanent
   |-- State: idle | running | waiting | done | shipping
 ```
 
 ## Why cwt?
 
-When using Claude Code on a real codebase, you often want to run multiple tasks
+When using a provider (Claude or Codex) on a real codebase, you often want to run multiple tasks
 in parallel — fix a bug, add a feature, write tests — without them stepping on
 each other. Git worktrees give you cheap, isolated copies of your repo. cwt
-manages the lifecycle of those worktrees and the Claude sessions inside them,
+manages the lifecycle of those worktrees and the provider sessions inside them,
 all from a single TUI.
 
 - **Spin up a worktree in seconds** — auto-named, auto-branched, ready to go
@@ -37,8 +37,7 @@ all from a single TUI.
 
 - **git** (with worktree support)
 - **tmux** (mandatory; interactive mode and session management depend on it)
-- [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) CLI
-  (`claude`)
+- A provider CLI (`claude` or `codex`)
 
 Optional:
 
@@ -122,7 +121,7 @@ cd ~/my-project
 cwt
 
 # 3. Press 'n' to create a worktree (Enter for auto-generated name)
-# 4. Press 's' to launch a Claude session in it
+# 4. Press 's' to launch a provider session in it
 # 5. Press 'Tab' to switch between the worktree list and inspector panels
 ```
 
@@ -173,8 +172,15 @@ cwt status                             # CLI summary across repos
 
 ### tmux Session Management
 
-- **Launch** Claude Code in a tmux pane attached to any worktree
-- **Resume** previous sessions using Claude Code's `--resume` flag
+### Session Providers
+
+- cwt supports two provider options: `claude` and `codex`
+- You can set the default in config with `session.provider = "claude"` or `"codex"`
+- You can change the active provider at runtime by pressing `o` in the TUI
+- Press `O` to persist the currently selected provider as the default
+
+- **Launch** the provider (Claude or Codex) in a tmux pane attached to any worktree
+- **Resume** previous sessions using the active provider's resume flow (`--resume` for Claude)
 - **Focus** an existing session pane with a single keypress
 - **Open shell** in any worktree directory via a tmux pane
 - Sessions survive TUI exit — closing cwt does not kill running sessions
@@ -187,10 +193,10 @@ cwt status                             # CLI summary across repos
 - Diff preview before applying
 - Gitignore gap warnings for untracked files that won't transfer
 
-### Hooks (Real-Time Claude Code Integration)
+### Hooks (Real-Time Provider Integration)
 
 - **Unix domain socket** listener for sub-second event delivery
-- Worktrees created by Claude Code outside cwt appear in the list within one
+- Worktrees created by the provider (Claude or Codex) outside cwt appear in the list within one
   second
 - `cwt hooks install` patches `.claude/settings.json` and writes hook scripts to
   `.cwt/hooks/`
@@ -225,12 +231,12 @@ cwt status                             # CLI summary across repos
 ### Permission Levels
 
 cwt supports three permission tiers for provider sessions (Claude/Codex), giving you
-fine-grained control over how much autonomy Claude gets:
+fine-grained control over how much autonomy the provider gets:
 
 | Level | Badge | Behavior |
 | ----- | ----- | -------- |
 | **Normal** | `N` (gray) | Plain provider command — asks for permission on each tool use (default) |
-| **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — Claude runs autonomously within a sandbox |
+| **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — the provider runs autonomously within a sandbox |
 | **Elevated Unsandboxed** | `U!` (red) | Appends `--dangerously-skip-permissions` — full autonomy, no sandbox |
 
 - Press `m` to cycle through modes at runtime
@@ -244,7 +250,7 @@ Provider-specific mode behavior:
 - Claude: `Elevated` injects sandbox settings; `Unsandboxed` uses `--dangerously-skip-permissions`.
 - Codex: `Unsandboxed` uses `--full-auto`; `Elevated Unsandboxed` uses `--dangerously-bypass-approvals-and-sandbox`.
 
-The elevated (sandboxed) Claude mode writes these settings before launch:
+The elevated (sandboxed) provider mode writes these settings before launch:
 
 ```json
 {
@@ -300,7 +306,7 @@ The elevated (sandboxed) Claude mode writes these settings before launch:
 | --- | -------------------------------------------- | ------- |
 | `m` | Cycle mode (Normal/Unsandboxed/Elevated Unsandboxed) | Global  |
 | `M` | Save current mode as default               | Global  |
-| `o` | Cycle session provider (Claude/Codex)      | Global  |
+| `o` | Cycle session provider (Claude/Codex) at runtime | Global  |
 | `O` | Save current provider as default           | Global  |
 
 ### Navigation
@@ -330,7 +336,7 @@ The elevated (sandboxed) Claude mode writes these settings before launch:
 | `cwt delete <name>`                 | Delete a worktree (saves snapshot) |
 | `cwt promote <name>`                | Promote ephemeral to permanent     |
 | `cwt gc [--execute]`                | Preview/run garbage collection     |
-| `cwt hooks install`                 | Install Claude Code hook scripts   |
+| `cwt hooks install`                 | Install provider hook scripts      |
 | `cwt hooks uninstall`               | Remove hook scripts                |
 | `cwt hooks status`                  | Show hook and socket status        |
 | `cwt dispatch "task" ...`           | Dispatch parallel tasks            |
@@ -407,7 +413,7 @@ src/
   state/           # JSON state persistence (.cwt/state.json)
   git/             # Git worktree, branch, and diff operations
   worktree/        # Worktree CRUD, handoff, snapshots, setup, slug generation
-  session/         # Claude session launcher, tracker, transcript parser
+  session/         # provider session launcher, tracker, transcript parser
   tmux/            # tmux pane create/focus/kill/send-keys
   hooks/           # Unix socket listener, hook events, script installer
   forest/          # Multi-repo config, global index
@@ -424,7 +430,7 @@ src/
 Install it first, then run `cwt` again. If you launch `cwt` from a normal
 interactive shell, it will bootstrap into tmux automatically when possible.
 
-**Worktrees don't appear after Claude Code creates them** Run
+**Worktrees don't appear after a provider creates them** Run
 `cwt hooks install` to set up the real-time hook integration. Without hooks, cwt
 discovers worktrees on periodic refresh (every few seconds).
 
@@ -432,7 +438,7 @@ discovers worktrees on periodic refresh (every few seconds).
 [GitHub CLI](https://cli.github.com/) is installed and authenticated
 (`gh auth login`).
 
-**Sessions show "idle" even though Claude is running** cwt detects session
+**Sessions show "idle" even though the provider is running** cwt detects session
 status by parsing `~/.claude/projects/` transcripts. If the path hash doesn't
 match, status won't update. Restarting cwt re-scans the project directory.
 

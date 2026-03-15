@@ -1,17 +1,17 @@
-# cwt — Claude Worktree Manager
+# cwt — Provider (Claude or Codex) Worktree Manager
 
-A TUI worktree manager for Claude Code. The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
+A TUI worktree manager for the provider (Claude or Codex). The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
 
 ## Project Overview
 
-`cwt` is a Rust TUI (ratatui + crossterm) that manages git worktrees purpose-built for parallel Claude Code sessions. It runs inside tmux and manages panes for each active session.
+`cwt` is a Rust TUI (ratatui + crossterm) that manages git worktrees purpose-built for parallel provider (Claude or Codex) sessions. It runs inside tmux and manages panes for each active session.
 
 ### Core Mental Model
 
 ```
 Worktree (unit of work)
   |-- Branch (auto-created or user-specified)
-  |-- Session (Claude Code instance, 0 or 1 active)
+  |-- Session (provider instance, 0 or 1 active)
   |-- Lifecycle: ephemeral | permanent
   |-- State: idle | running | waiting | done | shipping
   |-- Optional: container, port allocation, remote host
@@ -58,7 +58,7 @@ src/
     slug.rs                 # Auto-generate slug names (adj-noun-hex)
   session/
     mod.rs
-    launcher.rs             # Launch claude in tmux pane
+    launcher.rs             # Launch provider in tmux pane
     tracker.rs              # Parse ~/.claude/ for session status
     transcript.rs           # Read last N messages from session JSONL
   tmux/
@@ -150,12 +150,12 @@ src/
 ### Session Launching (tmux)
 - Each worktree session runs in a tmux pane within the current tmux session
 - Pane naming: `cwt:<worktree-name>`
-- Launch: `tmux split-window -h -t <session> "cd <worktree-path> && claude"`
+- Launch: `tmux split-window -h -t <session> "cd <worktree-path> && <provider-command>"`
 - Focus: `tmux select-pane -t cwt:<name>`
 - Status check: `tmux list-panes -F '#{pane_title} #{pane_current_command}'`
 
 ### Session Transcript Preview
-- Claude Code stores sessions at `~/.claude/projects/<path-hash>/`
+- The provider stores sessions at `~/.claude/projects/<path-hash>/` (Claude-compatible transcript path).
 - Each session is a `.jsonl` file with conversation turns
 - Parse the last 2-3 assistant messages for the "Last msg" preview
 - Show token count / cost if available in the transcript
@@ -167,15 +167,15 @@ src/
 - Snapshot remaining, then delete oldest until under `max_ephemeral`
 - Show preview of what will be pruned before executing
 
-### Hooks (Claude Code Integration)
+### Hooks (Provider Integration)
 
-cwt integrates with Claude Code via its hook system for real-time state sync.
+cwt integrates with the provider (Claude or Codex) via its hook system for real-time state sync.
 
 #### Communication Path
 ```
-Claude Code hook fires
+Provider hook fires
   -> runs .cwt/hooks/<event>.sh
-    -> reads JSON from stdin (Claude Code's event payload)
+    -> reads JSON from stdin (provider event payload)
     -> transforms to cwt event format
     -> writes JSON to Unix socket /tmp/cwt-<repo-hash>.sock
       -> cwt TUI event loop reads from socket
@@ -183,7 +183,7 @@ Claude Code hook fires
 ```
 
 #### Hook Events
-| Claude Code Hook | cwt Event | Effect |
+| Provider Hook | cwt Event | Effect |
 |---|---|---|
 | WorktreeCreate | WorktreeCreated | New worktree appears in list |
 | WorktreeRemove | WorktreeRemoved | Worktree removed from list |
@@ -198,7 +198,7 @@ Unix sockets are used instead of file polling for sub-second latency and clean a
 | Key | Action | Context |
 |-----|--------|---------|
 | `n` | New worktree (Enter to quick-create) | Global |
-| `s` | Launch/resume Claude session | Worktree selected |
+| `s` | Launch/resume provider session | Worktree selected |
 | `Enter` | Open shell in worktree (tmux pane) | Worktree selected |
 | `h` | Handoff | Worktree selected |
 | `p` | Promote to permanent | Ephemeral selected |
@@ -214,6 +214,8 @@ Unix sockets are used instead of file polling for sub-second latency and clean a
 | `Tab` | Switch panel focus | Global |
 | `/` | Filter/search worktrees | Worktree list |
 | `?` | Help overlay | Global |
+| `o` | Cycle session provider (Claude/Codex) at runtime | Global |
+| `O` | Save current provider as default | Global |
 | `q` | Quit | Global |
 
 ## Config Format
@@ -230,8 +232,9 @@ script = ""                      # path to setup script (relative to repo root)
 timeout_secs = 120               # setup script timeout
 
 [session]
-auto_launch = true               # launch claude on worktree create
-claude_args = []                 # extra args for claude invocation
+auto_launch = true               # launch provider on worktree create
+provider = "claude"              # "claude" | "codex"
+provider_args = []               # extra args for provider invocation
 
 [handoff]
 method = "patch"                 # "patch" or "cherry-pick"

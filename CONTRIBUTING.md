@@ -63,7 +63,7 @@ src/
   state/           # JSON state persistence
   git/             # Git worktree, branch, diff ops
   worktree/        # Worktree CRUD, handoff, snapshots
-  session/         # Claude session launcher + tracker
+  session/         # provider session launcher + tracker
   tmux/            # tmux pane management
   hooks/           # Unix socket listener, hook scripts
   forest/          # Multi-repo config + index
