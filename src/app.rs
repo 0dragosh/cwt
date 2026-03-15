@@ -12,6 +12,7 @@ use crate::hooks::event::HookEvent;
 use crate::orchestration;
 use crate::remote;
 use crate::session;
+use crate::session::provider::SessionProvider;
 use crate::ship;
 use crate::ui;
 use crate::worktree::handoff::{self, HandoffDirection};
@@ -86,6 +87,8 @@ pub struct App {
     pub help_scroll: u16,
     /// Runtime override for the permission level (None = use config default).
     pub permission_override: Option<PermissionLevel>,
+    /// Runtime override for session provider (None = use config default).
+    pub provider_override: Option<SessionProvider>,
     /// Metadata about the loaded config file.
     pub config_meta: ConfigMeta,
 }
@@ -139,6 +142,7 @@ impl App {
             remote_statuses,
             help_scroll: 0,
             permission_override: None,
+            provider_override: None,
             config_meta,
         };
 
@@ -234,6 +238,11 @@ impl App {
     fn active_permission(&self) -> PermissionLevel {
         self.permission_override
             .unwrap_or(self.manager.config.session.default_permission)
+    }
+
+    fn active_provider(&self) -> SessionProvider {
+        self.provider_override
+            .unwrap_or(self.manager.config.session.provider)
     }
 
     /// Update aggregate dashboard stats across all sessions.
@@ -437,6 +446,7 @@ impl App {
             total_tokens,
             self.dashboard.total_cost_usd,
             self.active_permission(),
+            self.active_provider(),
         );
 
         // Render the worktree list
@@ -665,10 +675,17 @@ impl App {
                 let next = current.cycle_next();
                 self.permission_override = Some(next);
                 self.status_message = format!(
-                    "Permission level: {} ({})",
-                    next.label(),
-                    next.short_label()
+                    "Mode: {} ({}) for {}",
+                    self.active_provider().mode_label(next),
+                    next.short_label(),
+                    self.active_provider().label()
                 );
+            }
+            KeyCode::Char('o') => {
+                let current = self.active_provider();
+                let next = current.cycle_next();
+                self.provider_override = Some(next);
+                self.status_message = format!("Provider: {}", next.label());
             }
             KeyCode::Char('M') => {
                 if self.config_meta.nix_managed {
@@ -686,6 +703,31 @@ impl App {
                             self.status_message = format!(
                                 "Saved default permission '{}' to {}",
                                 level.label(),
+                                path.display()
+                            );
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to save config: {}", e);
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('O') => {
+                if self.config_meta.nix_managed {
+                    self.status_message =
+                        "Config is Nix-managed (read-only). Update your home-manager config instead.".to_string();
+                } else {
+                    let provider = self.active_provider();
+                    self.manager.config.session.provider = provider;
+                    let path =
+                        self.config_meta.source_path.clone().unwrap_or_else(|| {
+                            config::project_config_path(&self.manager.repo_root)
+                        });
+                    match config::save_config(&self.manager.config, &path) {
+                        Ok(()) => {
+                            self.status_message = format!(
+                                "Saved default provider '{}' to {}",
+                                provider.label(),
                                 path.display()
                             );
                         }
@@ -1129,25 +1171,21 @@ impl App {
 
         let permission = self.active_permission();
         let permissions = &self.manager.config.session.permissions;
+        let mut session_cfg = self.manager.config.session.clone();
+        session_cfg.provider = self.active_provider();
         let launch_result = if let Some(ref sid) = session_id {
             // Try to resume a previous session
             session::launcher::resume_session(
                 &wt,
                 &wt_abs,
                 sid,
-                &self.manager.config.session,
+                &session_cfg,
                 permission,
                 permissions,
             )
         } else {
             // Fresh launch
-            session::launcher::launch_session(
-                &wt,
-                &wt_abs,
-                &self.manager.config.session,
-                permission,
-                permissions,
-            )
+            session::launcher::launch_session(&wt, &wt_abs, &session_cfg, permission, permissions)
         };
 
         match launch_result {
@@ -1917,13 +1955,19 @@ impl App {
             let permission = self.active_permission();
             let permissions = &self.manager.config.session.permissions;
             // Launch a new remote session
+            let remote_cmd_cfg = remote::session::RemoteCommandConfig {
+                provider: self.active_provider(),
+                command: &self.manager.config.session.command,
+                provider_args: &self.manager.config.session.provider_args,
+                permission,
+                permissions,
+            };
+
             match remote::session::launch_remote_session(
                 &host,
                 &repo_name,
                 &wt.name,
-                &self.manager.config.session.claude_args,
-                permission,
-                permissions,
+                &remote_cmd_cfg,
             ) {
                 Ok(_tmux_session) => {
                     self.status_message = format!(
@@ -2325,6 +2369,8 @@ pub struct ForestApp {
     pub help_scroll: u16,
     /// Runtime override for the permission level.
     pub permission_override: Option<PermissionLevel>,
+    /// Runtime override for provider.
+    pub provider_override: Option<SessionProvider>,
 }
 
 impl ForestApp {
@@ -2383,6 +2429,7 @@ impl ForestApp {
             last_wt_list_area: None,
             help_scroll: 0,
             permission_override: None,
+            provider_override: None,
         };
 
         app.update_aggregate_counts();
@@ -2454,6 +2501,15 @@ impl ForestApp {
         // Use the selected repo's config default, or fall back to Normal
         self.selected_repo()
             .map(|r| r.manager.config.session.default_permission)
+            .unwrap_or_default()
+    }
+
+    fn active_provider(&self) -> SessionProvider {
+        if let Some(ovr) = self.provider_override {
+            return ovr;
+        }
+        self.selected_repo()
+            .map(|r| r.manager.config.session.provider)
             .unwrap_or_default()
     }
 
@@ -2892,35 +2948,58 @@ impl ForestApp {
                 let next = current.cycle_next();
                 self.permission_override = Some(next);
                 self.status_message = format!(
-                    "Permission level: {} ({})",
-                    next.label(),
-                    next.short_label()
+                    "Mode: {} ({}) for {}",
+                    self.active_provider().mode_label(next),
+                    next.short_label(),
+                    self.active_provider().label()
                 );
             }
+            KeyCode::Char('o') => {
+                let current = self.active_provider();
+                let next = current.cycle_next();
+                self.provider_override = Some(next);
+                self.status_message = format!("Provider: {}", next.label());
+            }
             KeyCode::Char('M') => {
-                // In forest mode, save to the selected repo's config
                 if let Some(repo) = self.selected_repo() {
                     let repo_root = repo.manager.repo_root.clone();
                     let path = config::project_config_path(&repo_root);
-                    if config::ConfigMeta::default().nix_managed {
-                        self.status_message =
-                            "Config is Nix-managed (read-only). Update your home-manager config instead.".to_string();
-                    } else {
-                        let level = self.active_permission();
-                        // Clone config and save
-                        let mut cfg = repo.manager.config.clone();
-                        cfg.session.default_permission = level;
-                        match config::save_config(&cfg, &path) {
-                            Ok(()) => {
-                                self.status_message = format!(
-                                    "Saved default permission '{}' to {}",
-                                    level.label(),
-                                    path.display()
-                                );
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Failed to save config: {}", e);
-                            }
+                    let level = self.active_permission();
+                    let mut cfg = repo.manager.config.clone();
+                    cfg.session.default_permission = level;
+                    match config::save_config(&cfg, &path) {
+                        Ok(()) => {
+                            self.status_message = format!(
+                                "Saved default permission '{}' to {}",
+                                level.label(),
+                                path.display()
+                            );
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to save config: {}", e);
+                        }
+                    }
+                } else {
+                    self.status_message = "No repo selected".to_string();
+                }
+            }
+            KeyCode::Char('O') => {
+                if let Some(repo) = self.selected_repo() {
+                    let repo_root = repo.manager.repo_root.clone();
+                    let path = config::project_config_path(&repo_root);
+                    let provider = self.active_provider();
+                    let mut cfg = repo.manager.config.clone();
+                    cfg.session.provider = provider;
+                    match config::save_config(&cfg, &path) {
+                        Ok(()) => {
+                            self.status_message = format!(
+                                "Saved default provider '{}' to {}",
+                                provider.label(),
+                                path.display()
+                            );
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to save config: {}", e);
                         }
                     }
                 } else {
@@ -3447,23 +3526,19 @@ impl ForestApp {
 
         let permission = self.active_permission();
         let permissions = &repo.manager.config.session.permissions;
+        let mut session_cfg = repo.manager.config.session.clone();
+        session_cfg.provider = self.active_provider();
         let launch_result = if let Some(ref sid) = session_id {
             session::launcher::resume_session(
                 &wt,
                 &wt_abs,
                 sid,
-                &repo.manager.config.session,
+                &session_cfg,
                 permission,
                 permissions,
             )
         } else {
-            session::launcher::launch_session(
-                &wt,
-                &wt_abs,
-                &repo.manager.config.session,
-                permission,
-                permissions,
-            )
+            session::launcher::launch_session(&wt, &wt_abs, &session_cfg, permission, permissions)
         };
 
         match launch_result {
