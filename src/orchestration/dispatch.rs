@@ -96,8 +96,10 @@ pub fn launch_with_prompt(
         anyhow::bail!("cwt sessions require tmux -- please run cwt inside a tmux session");
     }
 
-    if let Some(ref settings) = config.permissions.get(permission).settings_override {
-        inject_settings_override(worktree_abs_path, settings)?;
+    if config.provider == crate::session::provider::SessionProvider::Claude {
+        if let Some(ref settings) = config.permissions.get(permission).settings_override {
+            inject_settings_override(worktree_abs_path, settings)?;
+        }
     }
 
     let command = if config.command.trim().is_empty() {
@@ -113,8 +115,19 @@ pub fn launch_with_prompt(
     for arg in &config.provider_args {
         cmd_parts.push(shell_quote(arg));
     }
-    for arg in &config.permissions.get(permission).extra_args {
-        cmd_parts.push(arg.clone());
+    let permission_args: Vec<String> =
+        if config.provider == crate::session::provider::SessionProvider::Codex {
+            config
+                .provider
+                .permission_args(permission)
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
+        } else {
+            config.permissions.get(permission).extra_args.clone()
+        };
+    for arg in permission_args {
+        cmd_parts.push(arg);
     }
     let command = cmd_parts.join(" ");
 

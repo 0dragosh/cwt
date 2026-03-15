@@ -6,6 +6,7 @@ use ratatui::Frame;
 use std::path::Path;
 
 use crate::config::model::PermissionLevel;
+use crate::session::provider::SessionProvider;
 
 /// Three-row layout: top bar + two-panel content + status bar.
 /// Returns (top_bar, list_panel, inspector_panel, status_bar).
@@ -59,6 +60,7 @@ pub fn render_top_bar(
     waiting_count: usize,
     done_count: usize,
     permission_level: PermissionLevel,
+    provider: SessionProvider,
 ) {
     render_top_bar_with_stats(
         f,
@@ -69,6 +71,7 @@ pub fn render_top_bar(
         None,
         None,
         permission_level,
+        provider,
     );
 }
 
@@ -83,6 +86,7 @@ pub fn render_top_bar_with_stats(
     total_tokens: Option<(u64, u64)>,
     total_cost: Option<f64>,
     permission_level: PermissionLevel,
+    provider: SessionProvider,
 ) {
     let project_name = repo_root
         .file_name()
@@ -109,6 +113,16 @@ pub fn render_top_bar_with_stats(
             Style::default().fg(Color::DarkGray),
         ),
     ];
+
+    // Provider badge
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        format!(" {} ", provider.short_label()),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
+    ));
 
     // Permission level badge
     {

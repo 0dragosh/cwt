@@ -233,13 +233,18 @@ fine-grained control over how much autonomy Claude gets:
 | **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — Claude runs autonomously within a sandbox |
 | **Elevated Unsandboxed** | `U!` (red) | Appends `--dangerously-skip-permissions` — full autonomy, no sandbox |
 
-- Press `m` to cycle through permission levels at runtime
-- Press `M` to save the current level as the default in your config
+- Press `m` to cycle through modes at runtime
+- Press `M` to save the current mode as the default in your config
 - The active level is shown as a badge in the top bar
 - Each worktree gets its own `.claude/settings.local.json`, so there are no
   concurrency conflicts between sessions
 
-The elevated (sandboxed) mode writes these settings before launch:
+Provider-specific mode behavior:
+
+- Claude: `Elevated` injects sandbox settings; `Unsandboxed` uses `--dangerously-skip-permissions`.
+- Codex: `Unsandboxed` uses `--full-auto`; `Elevated Unsandboxed` uses `--dangerously-bypass-approvals-and-sandbox`.
+
+The elevated (sandboxed) Claude mode writes these settings before launch:
 
 ```json
 {
@@ -266,7 +271,7 @@ The elevated (sandboxed) mode writes these settings before launch:
 | Key     | Action                               | Context            |
 | ------- | ------------------------------------ | ------------------ |
 | `n`     | New worktree                         | Global             |
-| `s`     | Launch/resume Claude session         | Worktree selected  |
+| `s`     | Launch/resume provider session         | Worktree selected  |
 | `h`     | Handoff changes (worktree <-> local) | Worktree selected  |
 | `p`     | Promote to permanent                 | Ephemeral selected |
 | `d`     | Delete (with snapshot)               | Worktree selected  |
@@ -293,8 +298,10 @@ The elevated (sandboxed) mode writes these settings before launch:
 
 | Key | Action                                       | Context |
 | --- | -------------------------------------------- | ------- |
-| `m` | Cycle permission level (Normal/Elevated/Unsandboxed) | Global  |
-| `M` | Save current permission level as default     | Global  |
+| `m` | Cycle mode (Normal/Unsandboxed/Elevated Unsandboxed) | Global  |
+| `M` | Save current mode as default               | Global  |
+| `o` | Cycle session provider (Claude/Codex)      | Global  |
+| `O` | Save current provider as default           | Global  |
 
 ### Navigation
 

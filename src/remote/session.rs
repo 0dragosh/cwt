@@ -44,8 +44,22 @@ pub fn launch_remote_session(
     for arg in cmd_cfg.provider_args {
         provider_parts.push(remote_shell_quote(arg));
     }
-    for arg in &cmd_cfg.permissions.get(cmd_cfg.permission).extra_args {
-        provider_parts.push(arg.clone());
+    let permission_args: Vec<String> = if cmd_cfg.provider == SessionProvider::Codex {
+        cmd_cfg
+            .provider
+            .permission_args(cmd_cfg.permission)
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        cmd_cfg
+            .permissions
+            .get(cmd_cfg.permission)
+            .extra_args
+            .clone()
+    };
+    for arg in permission_args {
+        provider_parts.push(arg);
     }
     let provider_cmd = provider_parts.join(" ");
 
@@ -88,8 +102,22 @@ pub fn resume_remote_session(
     for arg in cmd_cfg.provider_args {
         provider_parts.push(remote_shell_quote(arg));
     }
-    for arg in &cmd_cfg.permissions.get(cmd_cfg.permission).extra_args {
-        provider_parts.push(arg.clone());
+    let permission_args: Vec<String> = if cmd_cfg.provider == SessionProvider::Codex {
+        cmd_cfg
+            .provider
+            .permission_args(cmd_cfg.permission)
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        cmd_cfg
+            .permissions
+            .get(cmd_cfg.permission)
+            .extra_args
+            .clone()
+    };
+    for arg in permission_args {
+        provider_parts.push(arg);
     }
     let provider_cmd = provider_parts.join(" ");
 

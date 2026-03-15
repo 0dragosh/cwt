@@ -25,8 +25,8 @@ pub fn render(f: &mut Frame, scroll: u16) {
             "Worktree Actions",
             vec![
                 ("n", "New worktree (Enter to quick-create)"),
-                ("Enter", "Launch/resume Claude session"),
-                ("s", "Launch/resume Claude session"),
+                ("Enter", "Launch/resume provider session"),
+                ("s", "Launch/resume provider session"),
                 ("e", "Open shell in worktree (tmux tab)"),
                 ("h", "Handoff changes (worktree <-> local)"),
                 ("p", "Promote ephemeral to permanent"),
@@ -66,8 +66,10 @@ pub fn render(f: &mut Frame, scroll: u16) {
         (
             "Permissions",
             vec![
-                ("m", "Cycle permission level (Normal/Elevated/Unsandboxed)"),
-                ("M", "Save current permission level as default"),
+                ("m", "Cycle mode (Normal/Unsandboxed/Elevated Unsandboxed)"),
+                ("M", "Save current mode as default"),
+                ("o", "Cycle provider (Claude/Codex)"),
+                ("O", "Save current provider as default"),
             ],
         ),
         (
