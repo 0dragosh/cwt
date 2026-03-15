@@ -113,11 +113,11 @@ The three permission levels are:
 
 | Level | Key | Behavior |
 |-------|-----|----------|
-| Normal | `N` | Plain `claude` (default) |
+| Normal | `N` | Plain provider command (default) |
 | Elevated | `E` | Injects sandbox settings into `.claude/settings.local.json` |
 | Elevated Unsandboxed | `U!` | Appends `--dangerously-skip-permissions` |
 
-Press `m` in the TUI to cycle between levels at runtime. Note that `M` (save as default) is disabled when the config is Nix-managed since the file is a read-only symlink into the Nix store.
+Press `m` in the TUI to cycle between levels at runtime. Press `o` to cycle the active session provider (Claude/Codex) at runtime, and `O` to save it as default when config is writable. Note that `M` (save as default) is disabled when the config is Nix-managed since the file is a read-only symlink into the Nix store.
 
 ## How the Config File Works
 

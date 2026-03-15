@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- claude custom cmds ([#16](https://github.com/0dragosh/cwt/pull/16))
+- provider custom cmds ([#16](https://github.com/0dragosh/cwt/pull/16))
 
 ## [0.2.0](https://github.com/0dragosh/cwt/compare/v0.1.4...v0.2.0) - 2026-03-13
 
