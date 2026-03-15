@@ -224,12 +224,12 @@ cwt status                             # CLI summary across repos
 
 ### Permission Levels
 
-cwt supports three permission tiers for Claude Code sessions, giving you
+cwt supports three permission tiers for provider sessions (Claude/Codex), giving you
 fine-grained control over how much autonomy Claude gets:
 
 | Level | Badge | Behavior |
 | ----- | ----- | -------- |
-| **Normal** | `N` (gray) | Plain `claude` — asks for permission on each tool use (default) |
+| **Normal** | `N` (gray) | Plain provider command — asks for permission on each tool use (default) |
 | **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — Claude runs autonomously within a sandbox |
 | **Elevated Unsandboxed** | `U!` (red) | Appends `--dangerously-skip-permissions` — full autonomy, no sandbox |
 
@@ -350,8 +350,10 @@ script = ""                      # path to setup script (relative to repo root)
 timeout_secs = 120               # setup script timeout
 
 [session]
-auto_launch = true               # launch Claude on worktree create
-claude_args = []                 # extra args for claude invocation
+auto_launch = true               # launch session provider on worktree create
+provider = "claude"              # "claude" | "codex"
+command = ""                     # optional command override (defaults to provider binary)
+provider_args = []               # extra args for provider invocation
 default_permission = "normal"    # "normal", "elevated", or "elevated_unsandboxed"
 
 # Permission-level overrides (optional — sensible defaults built in)

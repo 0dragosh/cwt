@@ -1917,13 +1917,19 @@ impl App {
             let permission = self.active_permission();
             let permissions = &self.manager.config.session.permissions;
             // Launch a new remote session
+            let remote_cmd_cfg = remote::session::RemoteCommandConfig {
+                provider: self.manager.config.session.provider,
+                command: &self.manager.config.session.command,
+                provider_args: &self.manager.config.session.provider_args,
+                permission,
+                permissions,
+            };
+
             match remote::session::launch_remote_session(
                 &host,
                 &repo_name,
                 &wt.name,
-                &self.manager.config.session.claude_args,
-                permission,
-                permissions,
+                &remote_cmd_cfg,
             ) {
                 Ok(_tmux_session) => {
                     self.status_message = format!(

@@ -84,7 +84,7 @@ fn dispatch_one(
     }
 }
 
-/// Launch a Claude Code session with an initial prompt using -p flag.
+/// Launch a provider session with an initial prompt using -p flag.
 pub fn launch_with_prompt(
     worktree: &Worktree,
     worktree_abs_path: &Path,
@@ -100,11 +100,17 @@ pub fn launch_with_prompt(
         inject_settings_override(worktree_abs_path, settings)?;
     }
 
-    let mut cmd_parts = vec![config.command.clone()];
+    let command = if config.command.trim().is_empty() {
+        config.provider.default_command().to_string()
+    } else {
+        config.command.clone()
+    };
+
+    let mut cmd_parts = vec![command];
     // Add the prompt flag
     cmd_parts.push("-p".to_string());
     cmd_parts.push(shell_quote(prompt));
-    for arg in &config.claude_args {
+    for arg in &config.provider_args {
         cmd_parts.push(shell_quote(arg));
     }
     for arg in &config.permissions.get(permission).extra_args {

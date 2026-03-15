@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::remote::host::RemoteHost;
+use crate::session::provider::SessionProvider;
 
 /// Permission level for Claude Code sessions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,11 +172,14 @@ impl Default for SetupConfig {
 pub struct SessionConfig {
     #[serde(default = "default_true")]
     pub auto_launch: bool,
-    /// The command to launch (default: "claude"). Allows using custom wrappers.
-    #[serde(default = "default_session_command")]
+    /// Session provider implementation (e.g. Claude, Codex).
+    #[serde(default)]
+    pub provider: SessionProvider,
+    /// The command to launch. Defaults to the provider's canonical CLI binary.
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
-    pub claude_args: Vec<String>,
+    pub provider_args: Vec<String>,
     /// Default permission level for new sessions.
     #[serde(default)]
     pub default_permission: PermissionLevel,
@@ -188,16 +192,13 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             auto_launch: true,
-            command: default_session_command(),
-            claude_args: Vec::new(),
+            provider: SessionProvider::default(),
+            command: String::new(),
+            provider_args: Vec::new(),
             default_permission: PermissionLevel::default(),
             permissions: PermissionsConfig::default(),
         }
     }
-}
-
-fn default_session_command() -> String {
-    "claude".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,6 +2,26 @@ use anyhow::{Context, Result};
 
 use super::host::RemoteHost;
 use crate::config::model::{PermissionLevel, PermissionsConfig};
+use crate::session::provider::SessionProvider;
+
+#[derive(Debug, Clone)]
+pub struct RemoteCommandConfig<'a> {
+    pub provider: SessionProvider,
+    pub command: &'a str,
+    pub provider_args: &'a [String],
+    pub permission: PermissionLevel,
+    pub permissions: &'a PermissionsConfig,
+}
+
+impl<'a> RemoteCommandConfig<'a> {
+    fn command_or_default(&self) -> &str {
+        if self.command.trim().is_empty() {
+            self.provider.default_command()
+        } else {
+            self.command
+        }
+    }
+}
 
 /// Launch a Claude Code session on a remote host via SSH + tmux.
 ///
@@ -13,32 +33,30 @@ pub fn launch_remote_session(
     host: &RemoteHost,
     repo_name: &str,
     worktree_name: &str,
-    claude_args: &[String],
-    permission: PermissionLevel,
-    permissions: &PermissionsConfig,
+    cmd_cfg: &RemoteCommandConfig,
 ) -> Result<String> {
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
     let tmux_session = format!("cwt-{}", worktree_name);
 
-    // Build the claude command with proper shell quoting
-    let mut claude_parts = vec!["claude".to_string()];
-    for arg in claude_args {
-        claude_parts.push(remote_shell_quote(arg));
+    // Build the provider command with proper shell quoting
+    let mut provider_parts = vec![cmd_cfg.command_or_default().to_string()];
+    for arg in cmd_cfg.provider_args {
+        provider_parts.push(remote_shell_quote(arg));
     }
-    for arg in &permissions.get(permission).extra_args {
-        claude_parts.push(arg.clone());
+    for arg in &cmd_cfg.permissions.get(cmd_cfg.permission).extra_args {
+        provider_parts.push(arg.clone());
     }
-    let claude_cmd = claude_parts.join(" ");
+    let provider_cmd = provider_parts.join(" ");
 
-    // Create a tmux session on the remote host and run claude in it
+    // Create a tmux session on the remote host and run provider CLI in it
     let remote_cmd = format!(
         "tmux new-session -d -s {} -c {} {} 2>/dev/null || tmux send-keys -t {} {} Enter",
         remote_shell_quote(&tmux_session),
         remote_shell_quote(&wt_path),
-        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&provider_cmd),
         remote_shell_quote(&tmux_session),
-        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&provider_cmd),
     );
 
     host.ssh_exec(&remote_cmd).with_context(|| {
@@ -51,38 +69,37 @@ pub fn launch_remote_session(
     Ok(tmux_session)
 }
 
-/// Resume a Claude Code session on a remote host.
+/// Resume a provider session on a remote host.
 pub fn resume_remote_session(
     host: &RemoteHost,
     repo_name: &str,
     worktree_name: &str,
     session_id: &str,
-    claude_args: &[String],
-    permission: PermissionLevel,
-    permissions: &PermissionsConfig,
+    cmd_cfg: &RemoteCommandConfig,
 ) -> Result<String> {
     let repo_path = format!("{}/{}", host.worktree_dir, repo_name);
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
     let tmux_session = format!("cwt-{}", worktree_name);
 
-    let mut claude_parts = vec!["claude".to_string()];
-    claude_parts.push("--resume".to_string());
-    claude_parts.push(remote_shell_quote(session_id));
-    for arg in claude_args {
-        claude_parts.push(remote_shell_quote(arg));
+    let mut provider_parts = vec![cmd_cfg.command_or_default().to_string()];
+    for arg in cmd_cfg.provider.resume_args(session_id) {
+        provider_parts.push(remote_shell_quote(&arg));
     }
-    for arg in &permissions.get(permission).extra_args {
-        claude_parts.push(arg.clone());
+    for arg in cmd_cfg.provider_args {
+        provider_parts.push(remote_shell_quote(arg));
     }
-    let claude_cmd = claude_parts.join(" ");
+    for arg in &cmd_cfg.permissions.get(cmd_cfg.permission).extra_args {
+        provider_parts.push(arg.clone());
+    }
+    let provider_cmd = provider_parts.join(" ");
 
     let remote_cmd = format!(
         "tmux new-session -d -s {} -c {} {} 2>/dev/null || tmux send-keys -t {} {} Enter",
         remote_shell_quote(&tmux_session),
         remote_shell_quote(&wt_path),
-        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&provider_cmd),
         remote_shell_quote(&tmux_session),
-        remote_shell_quote(&claude_cmd),
+        remote_shell_quote(&provider_cmd),
     );
 
     host.ssh_exec(&remote_cmd)?;
@@ -169,7 +186,7 @@ pub fn check_remote_session_status(host: &RemoteHost, worktree_name: &str) -> Re
     match host.ssh_exec_fallible(&check_cmd) {
         Ok((stdout, _, true)) => {
             let command = stdout.trim().to_string();
-            if command.contains("claude") || command == "node" {
+            if command.contains("claude") || command.contains("codex") || command == "node" {
                 RemoteSessionStatus::Running
             } else if command.is_empty() {
                 RemoteSessionStatus::Unknown

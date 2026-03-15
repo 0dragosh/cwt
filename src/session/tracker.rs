@@ -14,10 +14,10 @@ pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
             match crate::tmux::pane::pane_current_command(pane_id) {
                 Ok(cmd) => {
                     let cmd_lower = cmd.to_lowercase();
-                    if cmd_lower.contains("claude") {
+                    if cmd_lower.contains("claude") || cmd_lower.contains("codex") {
                         WorktreeStatus::Running
                     } else {
-                        // Pane exists but claude isn't the foreground process — session ended
+                        // Pane exists but provider CLI isn't the foreground process — session ended
                         WorktreeStatus::Done
                     }
                 }

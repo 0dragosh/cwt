@@ -6,7 +6,7 @@ use crate::env::container::{ContainerRuntime, ContainerStatus};
 use crate::tmux;
 use crate::worktree::model::Worktree;
 
-/// Launch a new Claude Code session in a tmux pane for the given worktree.
+/// Launch a new provider session in a tmux pane for the given worktree.
 /// If the worktree has a running container, the session runs inside it.
 /// Returns the tmux pane ID.
 pub fn launch_session(
@@ -24,7 +24,7 @@ pub fn launch_session(
         inject_settings_override(worktree_abs_path, settings)?;
     }
 
-    let command = build_claude_command(worktree, config, None, permission, permissions);
+    let command = build_provider_command(worktree, config, None, permission, permissions);
     let pane_title = format!("cwt:{}", worktree.name);
 
     let pane_id = tmux::pane::create_pane(worktree_abs_path, &command, &pane_title)
@@ -33,8 +33,8 @@ pub fn launch_session(
     Ok(pane_id)
 }
 
-/// Resume a previous Claude Code session in a new tmux pane.
-/// Uses `claude --resume` to continue the conversation.
+/// Resume a previous provider session in a new tmux pane.
+/// Uses provider-specific resume arguments to continue the conversation.
 /// Returns the tmux pane ID.
 pub fn resume_session(
     worktree: &Worktree,
@@ -52,7 +52,8 @@ pub fn resume_session(
         inject_settings_override(worktree_abs_path, settings)?;
     }
 
-    let command = build_claude_command(worktree, config, Some(session_id), permission, permissions);
+    let command =
+        build_provider_command(worktree, config, Some(session_id), permission, permissions);
     let pane_title = format!("cwt:{}", worktree.name);
 
     let pane_id = tmux::pane::create_pane(worktree_abs_path, &command, &pane_title)
@@ -61,22 +62,30 @@ pub fn resume_session(
     Ok(pane_id)
 }
 
-/// Build the claude command string, optionally wrapping it in a container exec.
-fn build_claude_command(
+/// Build the provider command string, optionally wrapping it in a container exec.
+fn build_provider_command(
     worktree: &Worktree,
     config: &SessionConfig,
     resume_session_id: Option<&str>,
     permission: PermissionLevel,
     permissions: &PermissionsConfig,
 ) -> String {
-    let mut cmd_parts = vec![config.command.clone()];
+    let provider = config.provider;
+    let command = if config.command.trim().is_empty() {
+        provider.default_command().to_string()
+    } else {
+        config.command.clone()
+    };
+
+    let mut cmd_parts = vec![command];
 
     if let Some(sid) = resume_session_id {
-        cmd_parts.push("--resume".to_string());
-        cmd_parts.push(shell_quote(sid));
+        for arg in provider.resume_args(sid) {
+            cmd_parts.push(shell_quote(&arg));
+        }
     }
 
-    for arg in &config.claude_args {
+    for arg in &config.provider_args {
         cmd_parts.push(shell_quote(arg));
     }
 
@@ -84,24 +93,24 @@ fn build_claude_command(
         cmd_parts.push(arg.clone());
     }
 
-    let claude_cmd = cmd_parts.join(" ");
+    let provider_cmd = cmd_parts.join(" ");
 
     // If the worktree has a running container, exec into it
     if let Some(ref container) = worktree.container {
         if container.status == ContainerStatus::Running {
             if let Some(ref cid) = container.container_id {
-                return build_container_exec_command(&container.runtime, cid, &claude_cmd);
+                return build_container_exec_command(&container.runtime, cid, &provider_cmd);
             }
             if let Some(ref name) = container.container_name {
-                return build_container_exec_command(&container.runtime, name, &claude_cmd);
+                return build_container_exec_command(&container.runtime, name, &provider_cmd);
             }
         }
     }
 
-    claude_cmd
+    provider_cmd
 }
 
-/// Build a container exec command that runs claude inside the container.
+/// Build a container exec command that runs the provider CLI inside the container.
 fn build_container_exec_command(
     runtime: &ContainerRuntime,
     container_id: &str,
@@ -187,6 +196,37 @@ pub fn kill_session(pane_id: &str) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn provider_builds_codex_resume_command() {
+        let wt = Worktree::new(
+            "wt-test".to_string(),
+            std::path::PathBuf::from("/tmp/wt-test"),
+            "wt/wt-test".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            crate::worktree::model::Lifecycle::Ephemeral,
+        );
+        let cfg = SessionConfig {
+            provider: crate::session::provider::SessionProvider::Codex,
+            command: String::new(),
+            provider_args: vec!["--model".to_string(), "gpt-5-codex".to_string()],
+            ..SessionConfig::default()
+        };
+
+        let cmd = build_provider_command(
+            &wt,
+            &cfg,
+            Some("sess-123"),
+            PermissionLevel::Normal,
+            &PermissionsConfig::default(),
+        );
+
+        assert!(cmd.contains("codex"));
+        assert!(cmd.contains("resume"));
+        assert!(cmd.contains("sess-123"));
+        assert!(cmd.contains("gpt-5-codex"));
+    }
 
     // --- json_deep_merge ---
 
