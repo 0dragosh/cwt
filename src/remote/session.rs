@@ -14,12 +14,8 @@ pub struct RemoteCommandConfig<'a> {
 }
 
 impl<'a> RemoteCommandConfig<'a> {
-    fn command_or_default(&self) -> &str {
-        if self.command.trim().is_empty() {
-            self.provider.default_command()
-        } else {
-            self.command
-        }
+    fn command_or_default(&self) -> String {
+        self.provider.resolve_command(self.command)
     }
 }
 
@@ -40,7 +36,7 @@ pub fn launch_remote_session(
     let tmux_session = format!("cwt-{}", worktree_name);
 
     // Build the provider command with proper shell quoting
-    let mut provider_parts = vec![cmd_cfg.command_or_default().to_string()];
+    let mut provider_parts = vec![cmd_cfg.command_or_default()];
     for arg in cmd_cfg.provider_args {
         provider_parts.push(remote_shell_quote(arg));
     }
@@ -95,7 +91,7 @@ pub fn resume_remote_session(
     let wt_path = format!("{}/worktrees/{}", repo_path, worktree_name);
     let tmux_session = format!("cwt-{}", worktree_name);
 
-    let mut provider_parts = vec![cmd_cfg.command_or_default().to_string()];
+    let mut provider_parts = vec![cmd_cfg.command_or_default()];
     for arg in cmd_cfg.provider.resume_args(session_id) {
         provider_parts.push(remote_shell_quote(&arg));
     }

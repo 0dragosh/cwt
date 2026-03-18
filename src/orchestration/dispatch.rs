@@ -102,11 +102,7 @@ pub fn launch_with_prompt(
         }
     }
 
-    let command = if config.command.trim().is_empty() {
-        config.provider.default_command().to_string()
-    } else {
-        config.command.clone()
-    };
+    let command = config.provider.resolve_command(&config.command);
 
     let mut cmd_parts = vec![command];
     // Add the prompt flag

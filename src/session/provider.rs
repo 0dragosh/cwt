@@ -20,6 +20,22 @@ impl SessionProvider {
         }
     }
 
+    /// Resolve the executable name for this provider.
+    ///
+    /// Empty commands and stale built-in provider commands should follow the
+    /// active provider selection rather than pinning a previous default.
+    pub fn resolve_command(self, configured_command: &str) -> String {
+        let trimmed = configured_command.trim();
+        if trimmed.is_empty()
+            || trimmed == Self::Claude.default_command()
+            || trimmed == Self::Codex.default_command()
+        {
+            self.default_command().to_string()
+        } else {
+            configured_command.to_string()
+        }
+    }
+
     /// Human-readable provider name.
     pub fn label(self) -> &'static str {
         match self {
@@ -135,5 +151,29 @@ mod tests {
     fn provider_default_commands() {
         assert_eq!(SessionProvider::Claude.default_command(), "claude");
         assert_eq!(SessionProvider::Codex.default_command(), "codex");
+    }
+
+    #[test]
+    fn provider_resolve_command_uses_active_provider_for_builtin_defaults() {
+        assert_eq!(
+            SessionProvider::Codex.resolve_command(""),
+            SessionProvider::Codex.default_command()
+        );
+        assert_eq!(
+            SessionProvider::Codex.resolve_command("claude"),
+            SessionProvider::Codex.default_command()
+        );
+        assert_eq!(
+            SessionProvider::Claude.resolve_command("codex"),
+            SessionProvider::Claude.default_command()
+        );
+    }
+
+    #[test]
+    fn provider_resolve_command_preserves_custom_override() {
+        assert_eq!(
+            SessionProvider::Codex.resolve_command("/usr/local/bin/custom-codex"),
+            "/usr/local/bin/custom-codex"
+        );
     }
 }
