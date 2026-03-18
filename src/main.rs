@@ -283,12 +283,10 @@ fn launch_zellij_session(
     args: &[OsString],
 ) -> Result<std::process::ExitStatus> {
     match zellij_session_state("cwt")? {
-        Some(ZellijSessionState::Running) => {
-            ProcessCommand::new("zellij")
-                .args(zellij_attach_args("cwt"))
-                .status()
-                .context("failed to attach to existing zellij session")
-        }
+        Some(ZellijSessionState::Running) => ProcessCommand::new("zellij")
+            .args(zellij_attach_args("cwt"))
+            .status()
+            .context("failed to attach to existing zellij session"),
         Some(ZellijSessionState::Exited) => {
             delete_zellij_session("cwt")?;
             let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
@@ -343,7 +341,10 @@ fn zellij_session_state(session_name: &str) -> Result<Option<ZellijSessionState>
     ))
 }
 
-fn zellij_session_state_in_listing(session_name: &str, listing: &str) -> Option<ZellijSessionState> {
+fn zellij_session_state_in_listing(
+    session_name: &str,
+    listing: &str,
+) -> Option<ZellijSessionState> {
     for line in listing.lines() {
         let trimmed = line.trim();
         if trimmed == session_name || trimmed.starts_with(&format!("{session_name} ")) {
@@ -431,7 +432,8 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     crossterm::execute!(
         stdout,
         crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
@@ -494,7 +496,8 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     crossterm::execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange
     )?;
     terminal.show_cursor()?;
 
@@ -1038,7 +1041,8 @@ fn run_forest_tui() -> Result<()> {
     crossterm::execute!(
         stdout,
         crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
@@ -1075,7 +1079,8 @@ fn run_forest_tui() -> Result<()> {
     crossterm::execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange
     )?;
     terminal.show_cursor()?;
 

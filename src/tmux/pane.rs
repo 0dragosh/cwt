@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -297,17 +298,52 @@ fn create_tmux_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Re
 }
 
 fn create_zellij_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Result<String> {
-    let path_str = worktree_path
-        .to_str()
-        .context("worktree path is not valid UTF-8")?;
-
     let tab_name = format!("{}-{}", pane_title, unix_timestamp_millis());
-    zellij_action(&["new-tab", "--name", &tab_name, "--cwd", path_str])?;
-    zellij_action(&["go-to-tab-name", &tab_name])?;
-    zellij_action(&["rename-pane", pane_title])?;
-    zellij_action(&["write-chars", &format!("{command}\n")])?;
+    let layout_path = write_zellij_command_layout(worktree_path, command, pane_title)?;
+    let layout_str = layout_path
+        .to_str()
+        .context("zellij layout path is not valid UTF-8")?;
+    let launch_result = zellij_action(&["new-tab", "--layout", layout_str, "--name", &tab_name]);
+    let _ = fs::remove_file(&layout_path);
+    launch_result?;
 
     Ok(encode_zellij_tab_name(&tab_name))
+}
+
+fn write_zellij_command_layout(
+    worktree_path: &Path,
+    command: &str,
+    pane_title: &str,
+) -> Result<std::path::PathBuf> {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "cwt-zellij-pane-{}-{}.kdl",
+        std::process::id(),
+        unix_timestamp_millis()
+    ));
+
+    let layout = build_zellij_command_layout(worktree_path, command, pane_title)?;
+    fs::write(&path, layout)
+        .with_context(|| format!("failed to write zellij pane layout to {}", path.display()))?;
+
+    Ok(path)
+}
+
+fn build_zellij_command_layout(
+    worktree_path: &Path,
+    command: &str,
+    pane_title: &str,
+) -> Result<String> {
+    let worktree_path = worktree_path
+        .to_str()
+        .context("worktree path is not valid UTF-8")?;
+    let shell_command = build_shell_cmd(worktree_path, command);
+    let pane_title = kdl_string(pane_title)?;
+    let shell_command = kdl_string(&shell_command)?;
+
+    Ok(format!(
+        "layout {{\n    pane name={pane_title} command=\"sh\" {{\n        args \"-lc\" {shell_command}\n        focus true\n    }}\n}}\n"
+    ))
 }
 
 fn unix_timestamp_millis() -> u128 {
@@ -333,6 +369,10 @@ fn zellij_action(args: &[&str]) -> Result<String> {
 
 fn encode_zellij_tab_name(tab_name: &str) -> String {
     format!("zellij-tab:{tab_name}")
+}
+
+fn kdl_string(value: &str) -> Result<String> {
+    serde_json::to_string(value).context("failed to encode zellij layout string")
 }
 
 fn decode_zellij_tab_name(pane_id: &str) -> Result<String> {
@@ -373,8 +413,6 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// Build the shell command that will be executed in the tmux window.
-#[cfg(test)]
 fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
     format!("cd {} && {}", shell_escape(worktree_path), command)
 }
@@ -421,6 +459,23 @@ mod tests {
     fn test_build_shell_cmd_with_args() {
         let cmd = build_shell_cmd("/tmp/wt", "claude --resume sess-123");
         assert_eq!(cmd, "cd '/tmp/wt' && claude --resume sess-123");
+    }
+
+    #[test]
+    fn build_zellij_command_layout_runs_provider_without_typing_chars() {
+        let layout = build_zellij_command_layout(
+            Path::new("/tmp/test-wt"),
+            "claude --resume sess-123",
+            "cwt:wt-test",
+        )
+        .unwrap();
+
+        assert!(layout.contains("pane name=\"cwt:wt-test\" command=\"sh\""));
+        assert!(layout.contains("args \"-lc\" \"cd '/tmp/test-wt' && claude --resume sess-123\""));
+        assert!(
+            !layout.contains("write-chars"),
+            "layout launch should not synthesize provider keystrokes"
+        );
     }
 
     #[test]
