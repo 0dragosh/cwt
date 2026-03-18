@@ -38,6 +38,9 @@ pub enum HookEvent {
         timestamp: Option<DateTime<Utc>>,
         #[serde(default)]
         message: Option<String>,
+        /// Optional context usage percentage reported by hook payloads.
+        #[serde(default)]
+        context_usage_percent: Option<u8>,
     },
     /// A subagent stopped within a Claude Code session.
     SubagentStopped {
@@ -72,6 +75,44 @@ impl HookEvent {
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
+
+    /// Best-effort context usage percentage (0-100) for notification events.
+    pub fn context_usage_percent(&self) -> Option<u8> {
+        match self {
+            HookEvent::SessionNotification {
+                context_usage_percent,
+                message,
+                ..
+            } => (*context_usage_percent)
+                .or_else(|| message.as_deref().and_then(parse_context_percent_from_message)),
+            _ => None,
+        }
+    }
+}
+
+fn parse_context_percent_from_message(message: &str) -> Option<u8> {
+    let lowered = message.to_ascii_lowercase();
+    if !lowered.contains("context") {
+        return None;
+    }
+
+    let bytes = message.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx].is_ascii_digit() {
+            let start = idx;
+            while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+                idx += 1;
+            }
+            if idx < bytes.len() && bytes[idx] == b'%' {
+                let value = message[start..idx].parse::<u16>().ok()?;
+                return Some(value.min(100) as u8);
+            }
+            continue;
+        }
+        idx += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -128,5 +169,28 @@ mod tests {
         } else {
             panic!("expected SessionNotification");
         }
+    }
+
+    #[test]
+    fn notification_context_percent_parses_from_message() {
+        let json = r#"{
+            "event": "session_notification",
+            "worktree": "feature-auth",
+            "message": "Context window at 87% used"
+        }"#;
+        let event = HookEvent::from_json(json).unwrap();
+        assert_eq!(event.context_usage_percent(), Some(87));
+    }
+
+    #[test]
+    fn notification_context_percent_uses_explicit_field() {
+        let json = r#"{
+            "event": "session_notification",
+            "worktree": "feature-auth",
+            "message": "Waiting for input",
+            "context_usage_percent": 42
+        }"#;
+        let event = HookEvent::from_json(json).unwrap();
+        assert_eq!(event.context_usage_percent(), Some(42));
     }
 }

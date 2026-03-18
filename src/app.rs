@@ -62,6 +62,31 @@ fn should_process_key_event(key: &KeyEvent) -> bool {
     matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
 }
 
+fn parse_context_percent_from_message(message: &str) -> Option<u8> {
+    let lowered = message.to_ascii_lowercase();
+    if !lowered.contains("context") {
+        return None;
+    }
+
+    let bytes = message.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx].is_ascii_digit() {
+            let start = idx;
+            while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+                idx += 1;
+            }
+            if idx < bytes.len() && bytes[idx] == b'%' {
+                let value = message[start..idx].parse::<u16>().ok()?;
+                return Some(value.min(100) as u8);
+            }
+            continue;
+        }
+        idx += 1;
+    }
+    None
+}
+
 fn should_ignore_delete_shortcut(suppress_delete_until: &mut Option<Instant>) -> bool {
     let Some(until) = *suppress_delete_until else {
         return false;
@@ -363,11 +388,19 @@ impl App {
                 self.persist_session_stop(&worktree, session_id.as_deref());
             }
             HookEvent::SessionNotification {
-                worktree, message, ..
+                worktree,
+                message,
+                context_usage_percent,
+                ..
             } => {
+                let context_percent = context_usage_percent
+                    .or_else(|| message.as_deref().and_then(parse_context_percent_from_message));
                 // Update the worktree status to Waiting
                 if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == worktree) {
                     wt.status = WorktreeStatus::Waiting;
+                    if let Some(pct) = context_percent {
+                        wt.context_usage_percent = Some(pct);
+                    }
                 }
                 let msg = message.unwrap_or_default();
                 self.status_message = if msg.is_empty() {
@@ -566,6 +599,8 @@ impl App {
             &self.status_message,
             self.worktrees.len(),
             &self.remote_statuses,
+            self.selected_worktree()
+                .and_then(|wt| wt.context_usage_percent),
         );
 
         // Render active dialog on top
@@ -2822,7 +2857,14 @@ impl ForestApp {
             .and_then(|idx| self.repos.get(idx))
             .map(|r| r.worktrees.len())
             .unwrap_or(0);
-        ui::status_bar::render(frame, status_area, &self.status_message, repo_wt_count);
+        let selected_ctx = selected_wt.and_then(|wt| wt.context_usage_percent);
+        ui::status_bar::render(
+            frame,
+            status_area,
+            &self.status_message,
+            repo_wt_count,
+            selected_ctx,
+        );
 
         // Render active dialog on top
         match &self.dialog {

@@ -125,10 +125,29 @@ fi
 
 # Extract optional fields
 SESSION_ID=$(echo "$PAYLOAD" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+MESSAGE=$(echo "$PAYLOAD" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+MESSAGE_ESCAPED=$(printf '%s' "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+CONTEXT_PERCENT=$(echo "$PAYLOAD" | grep -o '"context_usage_percent"[[:space:]]*:[[:space:]]*[0-9]\{{1,3\}}' | head -1 | sed 's/.*:[[:space:]]*//')
+
+# Fallback: parse context percent from message text when present (e.g. "Context window at 82% used")
+if [ -z "$CONTEXT_PERCENT" ] && [ -n "$MESSAGE" ]; then
+    case "$(echo "$MESSAGE" | tr '[:upper:]' '[:lower:]')" in
+        *context*)
+            CONTEXT_PERCENT=$(echo "$MESSAGE" | grep -o '[0-9]\{{1,3\}}%' | head -1 | tr -d '%')
+            ;;
+    esac
+fi
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Build the cwt event JSON
-EVENT='{{"event":"{cwt_event}","worktree":"'"$WORKTREE"'","session_id":"'"$SESSION_ID"'","timestamp":"'"$TIMESTAMP"'"}}'
+EVENT='{{"event":"{cwt_event}","worktree":"'"$WORKTREE"'","session_id":"'"$SESSION_ID"'","timestamp":"'"$TIMESTAMP"'"'
+if [ -n "$MESSAGE_ESCAPED" ]; then
+    EVENT="$EVENT,\"message\":\"$MESSAGE_ESCAPED\""
+fi
+if [ -n "$CONTEXT_PERCENT" ]; then
+    EVENT="$EVENT,\"context_usage_percent\":$CONTEXT_PERCENT"
+fi
+EVENT="$EVENT}}"
 
 # Write to socket (best-effort, non-blocking)
 printf '%s\n' "$EVENT" | nc -U -w1 "$SOCKET" 2>/dev/null || true
