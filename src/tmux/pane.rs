@@ -342,7 +342,7 @@ fn build_zellij_command_layout(
     let shell_command = kdl_string(&shell_command)?;
 
     Ok(format!(
-        "layout {{\n    pane name={pane_title} command=\"sh\" {{\n        args \"-lc\" {shell_command}\n        focus true\n    }}\n}}\n"
+        "layout {{\n    pane name={pane_title} command=\"sh\" close_on_exit=true {{\n        args \"-lc\" {shell_command}\n        focus true\n    }}\n}}\n"
     ))
 }
 
@@ -414,7 +414,11 @@ fn shell_escape(s: &str) -> String {
 }
 
 fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
-    format!("cd {} && {}", shell_escape(worktree_path), command)
+    format!(
+        "cd {} && {{ {}; status=$?; tmux kill-pane -t \"$TMUX_PANE\" >/dev/null 2>&1 || true; exit $status; }}",
+        shell_escape(worktree_path),
+        command
+    )
 }
 
 #[cfg(test)]
@@ -452,13 +456,19 @@ mod tests {
     #[test]
     fn test_build_shell_cmd() {
         let cmd = build_shell_cmd("/home/user/project", "claude");
-        assert_eq!(cmd, "cd '/home/user/project' && claude");
+        assert_eq!(
+            cmd,
+            "cd '/home/user/project' && { claude; status=$?; tmux kill-pane -t \"$TMUX_PANE\" >/dev/null 2>&1 || true; exit $status; }"
+        );
     }
 
     #[test]
     fn test_build_shell_cmd_with_args() {
         let cmd = build_shell_cmd("/tmp/wt", "claude --resume sess-123");
-        assert_eq!(cmd, "cd '/tmp/wt' && claude --resume sess-123");
+        assert_eq!(
+            cmd,
+            "cd '/tmp/wt' && { claude --resume sess-123; status=$?; tmux kill-pane -t \"$TMUX_PANE\" >/dev/null 2>&1 || true; exit $status; }"
+        );
     }
 
     #[test]
@@ -470,8 +480,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(layout.contains("pane name=\"cwt:wt-test\" command=\"sh\""));
-        assert!(layout.contains("args \"-lc\" \"cd '/tmp/test-wt' && claude --resume sess-123\""));
+        assert!(layout.contains("pane name=\"cwt:wt-test\" command=\"sh\" close_on_exit=true"));
+        assert!(layout.contains(
+            "args \"-lc\" \"cd '/tmp/test-wt' && { claude --resume sess-123; status=$?; tmux kill-pane -t \\\"$TMUX_PANE\\\" >/dev/null 2>&1 || true; exit $status; }\""
+        ));
         assert!(
             !layout.contains("write-chars"),
             "layout launch should not synthesize provider keystrokes"
@@ -538,7 +550,7 @@ mod tests {
         // and builds the right shell command
         let cmd = build_shell_cmd("/tmp/test-wt", "claude");
         assert!(cmd.starts_with("cd '/tmp/test-wt'"));
-        assert!(cmd.ends_with("claude"));
+        assert!(cmd.contains("{ claude; status=$?;"));
     }
 
     /// Integration test: verify full tmux window lifecycle (create, focus, kill).

@@ -96,6 +96,25 @@ fn refresh_post_create_delete_guard_on_focus_return(
     }
 }
 
+fn capture_last_session_id(manager: &Manager, wt: &mut Worktree) {
+    if wt.last_session_id.is_some() {
+        return;
+    }
+
+    let wt_abs = manager.worktree_abs_path(wt);
+    if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
+        if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
+            wt.last_session_id = Some(sid);
+        }
+    }
+}
+
+fn mark_session_done(manager: &Manager, wt: &mut Worktree) {
+    capture_last_session_id(manager, wt);
+    wt.status = WorktreeStatus::Done;
+    wt.tmux_pane = None;
+}
+
 fn drain_pending_terminal_events() -> Result<usize> {
     drain_pending_terminal_events_with(|| event::poll(Duration::from_millis(0)), event::read)
         .map_err(Into::into)
@@ -236,15 +255,8 @@ impl App {
                 // If session just finished (was Running, now Done), clear the pane
                 // but preserve last_session_id for potential resume
                 if wt.status == WorktreeStatus::Running && new_status == WorktreeStatus::Done {
-                    // Try to capture the session ID before clearing
-                    if wt.last_session_id.is_none() {
-                        let wt_abs = self.manager.worktree_abs_path(wt);
-                        if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
-                            if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
-                                wt.last_session_id = Some(sid);
-                            }
-                        }
-                    }
+                    mark_session_done(&self.manager, wt);
+                    continue;
                 }
 
                 wt.status = new_status;
@@ -338,8 +350,9 @@ impl App {
                 // Update the worktree status to Done
                 if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == worktree) {
                     wt.status = WorktreeStatus::Done;
-                    if let Some(sid) = session_id {
-                        wt.last_session_id = Some(sid);
+                    wt.tmux_pane = None;
+                    if let Some(ref sid) = session_id {
+                        wt.last_session_id = Some(sid.clone());
                     }
                 }
                 self.status_message = format!("Session stopped for '{}'", worktree);
@@ -347,7 +360,7 @@ impl App {
                 self.update_inspector();
 
                 // Persist status change
-                self.persist_status_change(&worktree, WorktreeStatus::Done);
+                self.persist_session_stop(&worktree, session_id.as_deref());
             }
             HookEvent::SessionNotification {
                 worktree, message, ..
@@ -382,6 +395,19 @@ impl App {
         if let Ok(mut state) = self.manager.load_state() {
             if let Some(stored) = state.worktrees.get_mut(worktree_name) {
                 stored.status = status;
+            }
+            let _ = self.manager.save_state(&state);
+        }
+    }
+
+    fn persist_session_stop(&self, worktree_name: &str, session_id: Option<&str>) {
+        if let Ok(mut state) = self.manager.load_state() {
+            if let Some(stored) = state.worktrees.get_mut(worktree_name) {
+                stored.status = WorktreeStatus::Done;
+                stored.tmux_pane = None;
+                if let Some(sid) = session_id {
+                    stored.last_session_id = Some(sid.to_string());
+                }
             }
             let _ = self.manager.save_state(&state);
         }
@@ -2618,16 +2644,9 @@ impl ForestApp {
 
                     let new_status = session::tracker::check_status(wt.tmux_pane.as_deref());
 
-                    if wt.status == WorktreeStatus::Running
-                        && new_status == WorktreeStatus::Done
-                        && wt.last_session_id.is_none()
-                    {
-                        let wt_abs = repo.manager.worktree_abs_path(wt);
-                        if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
-                            if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
-                                wt.last_session_id = Some(sid);
-                            }
-                        }
+                    if wt.status == WorktreeStatus::Running && new_status == WorktreeStatus::Done {
+                        mark_session_done(&repo.manager, wt);
+                        continue;
                     }
 
                     wt.status = new_status;
@@ -4192,7 +4211,8 @@ mod selection_tests {
         should_process_key_event, ActiveDialog, App,
     };
     use crate::config::{Config, ConfigMeta};
-    use crate::worktree::model::{Lifecycle, Worktree};
+    use crate::hooks::event::HookEvent;
+    use crate::worktree::model::{Lifecycle, Worktree, WorktreeStatus};
     use crate::worktree::Manager;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use std::cell::RefCell;
@@ -4327,6 +4347,39 @@ mod selection_tests {
         let mut suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
         assert!(!should_ignore_delete_shortcut(&mut suppress_delete_until));
         assert!(suppress_delete_until.is_none());
+    }
+
+    #[test]
+    fn session_stopped_event_clears_attached_pane() {
+        let (_tmp, mut app) = make_test_app(false);
+        let mut wt = Worktree::new(
+            "wt-session".to_string(),
+            PathBuf::from("wt-session"),
+            "wt/wt-session".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            Lifecycle::Ephemeral,
+        );
+        wt.status = WorktreeStatus::Running;
+        wt.tmux_pane = Some("%12".to_string());
+        app.worktrees.push(wt);
+        app.list_state.select(Some(0));
+
+        app.handle_hook_event(HookEvent::SessionStopped {
+            worktree: "wt-session".to_string(),
+            session_id: Some("sess-123".to_string()),
+            timestamp: None,
+            data: None,
+        });
+
+        let wt = app
+            .worktrees
+            .iter()
+            .find(|wt| wt.name == "wt-session")
+            .unwrap();
+        assert_eq!(wt.status, WorktreeStatus::Done);
+        assert_eq!(wt.last_session_id.as_deref(), Some("sess-123"));
+        assert_eq!(wt.tmux_pane, None);
     }
 
     #[test]

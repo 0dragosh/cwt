@@ -264,17 +264,34 @@ fn bootstrap_target(
 }
 
 fn bootstrap_tmux_args(cwd: &Path, exe: &Path, args: &[OsString]) -> Vec<OsString> {
-    let mut tmux_args = vec![
+    vec![
         OsString::from("new-session"),
         OsString::from("-A"),
         OsString::from("-s"),
         OsString::from("cwt"),
         OsString::from("-c"),
         cwd.as_os_str().to_os_string(),
-        exe.as_os_str().to_os_string(),
-    ];
-    tmux_args.extend(args.iter().cloned());
-    tmux_args
+        OsString::from("sh"),
+        OsString::from("-lc"),
+        OsString::from(build_tmux_self_closing_command(exe, args)),
+    ]
+}
+
+fn build_tmux_self_closing_command(exe: &Path, args: &[OsString]) -> String {
+    let mut command_parts = Vec::with_capacity(args.len() + 1);
+    command_parts.push(shell_quote(exe.to_string_lossy().as_ref()));
+    for arg in args {
+        command_parts.push(shell_quote(&arg.to_string_lossy()));
+    }
+
+    format!(
+        "{}; status=$?; tmux kill-pane -t \"$TMUX_PANE\" >/dev/null 2>&1 || true; exit $status",
+        command_parts.join(" ")
+    )
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn launch_zellij_session(
@@ -410,7 +427,7 @@ fn build_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> R
     };
 
     Ok(format!(
-        "layout {{\n    pane size=1 borderless=true {{\n        plugin location=\"tab-bar\"\n    }}\n    pane command={exe} {{\n{args_line}        cwd {cwd}\n        focus true\n    }}\n    pane size=1 borderless=true {{\n        plugin location=\"status-bar\"\n    }}\n}}\n"
+        "layout {{\n    pane size=1 borderless=true {{\n        plugin location=\"tab-bar\"\n    }}\n    pane command={exe} close_on_exit=true {{\n{args_line}        cwd {cwd}\n        focus true\n    }}\n    pane size=1 borderless=true {{\n        plugin location=\"status-bar\"\n    }}\n}}\n"
     ))
 }
 
@@ -1169,8 +1186,9 @@ mod tests {
                 OsString::from("cwt"),
                 OsString::from("-c"),
                 OsString::from("/repo/root"),
-                OsString::from("/nix/store/bin/.cwt-wrapped"),
-                OsString::from("tui"),
+                OsString::from("sh"),
+                OsString::from("-lc"),
+                OsString::from("'/nix/store/bin/.cwt-wrapped' 'tui'; status=$?; tmux kill-pane -t \"$TMUX_PANE\" >/dev/null 2>&1 || true; exit $status"),
             ]
         );
     }
@@ -1208,7 +1226,7 @@ mod tests {
 
         assert_eq!(
             layout,
-            "layout {\n    pane size=1 borderless=true {\n        plugin location=\"tab-bar\"\n    }\n    pane command=\"/nix/store/bin/.cwt-wrapped\" {\n        args \"forest\" \"--flag\"\n        cwd \"/repo/root\"\n        focus true\n    }\n    pane size=1 borderless=true {\n        plugin location=\"status-bar\"\n    }\n}\n"
+            "layout {\n    pane size=1 borderless=true {\n        plugin location=\"tab-bar\"\n    }\n    pane command=\"/nix/store/bin/.cwt-wrapped\" close_on_exit=true {\n        args \"forest\" \"--flag\"\n        cwd \"/repo/root\"\n        focus true\n    }\n    pane size=1 borderless=true {\n        plugin location=\"status-bar\"\n    }\n}\n"
         );
     }
 
