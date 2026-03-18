@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8](https://github.com/0dragosh/cwt/compare/v0.2.7...v0.2.8) - 2026-03-18
+
+### Added
+
+- Add zellij-backed multiplexer support with tmux fallback ([#38](https://github.com/0dragosh/cwt/pull/38))
+- add cwt prompt output for starship worktree context ([#36](https://github.com/0dragosh/cwt/pull/36))
+
+### Other
+
+- *(release)* drop windows release artifacts ([#34](https://github.com/0dragosh/cwt/pull/34))
+
 ## [0.2.7](https://github.com/0dragosh/cwt/compare/v0.2.6...v0.2.7) - 2026-03-18
 
 ### Other
