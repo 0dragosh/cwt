@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4](https://github.com/0dragosh/cwt/compare/v0.2.3...v0.2.4) - 2026-03-18
+
+### Fixed
+
+- provider not working (codex) ([#25](https://github.com/0dragosh/cwt/pull/25))
+
+### Other
+
+- switch terminology to provider and document runtime provider toggle ([#23](https://github.com/0dragosh/cwt/pull/23))
+
 ## [0.2.3](https://github.com/0dragosh/cwt/compare/v0.2.2...v0.2.3) - 2026-03-15
 
 ### Added
