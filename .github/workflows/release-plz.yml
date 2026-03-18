@@ -11,6 +11,9 @@ jobs:
   release-plz:
     name: Release-plz
     runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.release-plz.outputs.releases }}
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
     permissions:
       contents: write
       pull-requests: write
@@ -40,3 +43,37 @@ jobs:
           for pr in $(echo '${{ steps.release-plz.outputs.prs }}' | jq -r '.[].number'); do
             gh pr merge "$pr" --auto --squash
           done
+
+  upload-release-assets:
+    name: Upload ${{ matrix.target }}
+    needs: release-plz
+    if: needs.release-plz.outputs.releases_created == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/upload-rust-binary-action@0e34102c043ded9f2ca39f7af5cd99a540c61aff # v1.29.1
+        with:
+          bin: cwt
+          target: ${{ matrix.target }}
+          ref: refs/tags/${{ fromJSON(needs.release-plz.outputs.releases)[0].tag }}
+          include: LICENSE,README.md
+          locked: true
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
