@@ -16,8 +16,6 @@ bin-dir = "{ bin }{ binary-ext }"
 [package.metadata.binstall.overrides.'cfg(unix)']
 pkg-fmt = "tgz"
 
-[package.metadata.binstall.overrides.'cfg(target_os = "windows")']
-pkg-fmt = "zip"
 
 [dependencies]
 ratatui = "0.30"
