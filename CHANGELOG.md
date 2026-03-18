@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9](https://github.com/0dragosh/cwt/compare/v0.2.8...v0.2.9) - 2026-03-18
+
+### Other
+
+- Auto-close panes when cwt and sessions exit ([#40](https://github.com/0dragosh/cwt/pull/40))
+- zellij
+
 ## [0.2.8](https://github.com/0dragosh/cwt/compare/v0.2.7...v0.2.8) - 2026-03-18
 
 ### Added
