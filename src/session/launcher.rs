@@ -75,11 +75,7 @@ fn build_provider_command(
     permissions: &PermissionsConfig,
 ) -> String {
     let provider = config.provider;
-    let command = if config.command.trim().is_empty() {
-        provider.default_command().to_string()
-    } else {
-        config.command.clone()
-    };
+    let command = provider.resolve_command(&config.command);
 
     let mut cmd_parts = vec![command];
 
@@ -241,6 +237,36 @@ mod tests {
         assert!(cmd.contains("resume"));
         assert!(cmd.contains("sess-123"));
         assert!(cmd.contains("gpt-5-codex"));
+    }
+
+    #[test]
+    fn provider_override_ignores_stale_builtin_command() {
+        let wt = Worktree::new(
+            "wt-test".to_string(),
+            std::path::PathBuf::from("/tmp/wt-test"),
+            "wt/wt-test".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            crate::worktree::model::Lifecycle::Ephemeral,
+        );
+        let cfg = SessionConfig {
+            provider: crate::session::provider::SessionProvider::Codex,
+            command: "claude".to_string(),
+            ..SessionConfig::default()
+        };
+
+        let cmd = build_provider_command(
+            &wt,
+            &cfg,
+            None,
+            PermissionLevel::Normal,
+            &PermissionsConfig::default(),
+        );
+
+        assert!(
+            cmd.starts_with("codex"),
+            "expected codex command, got: {cmd}"
+        );
     }
 
     // --- json_deep_merge ---

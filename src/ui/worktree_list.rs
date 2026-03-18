@@ -169,13 +169,7 @@ pub fn render(
         Style::default().fg(Color::DarkGray)
     };
 
-    let title = if filter_mode {
-        format!(" Worktrees ({}) [/{}|] ", filtered.len(), filter)
-    } else if !filter.is_empty() {
-        format!(" Worktrees ({}) [/{}] ", filtered.len(), filter)
-    } else {
-        format!(" Worktrees ({}) ", filtered.len())
-    };
+    let title = title_text(filtered.len(), focused, filter, filter_mode);
 
     let block = Block::default()
         .title(title)
@@ -184,7 +178,103 @@ pub fn render(
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(theme::selected_style());
+        .highlight_style(if focused {
+            theme::focused_selected_style()
+        } else {
+            theme::selected_style()
+        })
+        .highlight_symbol("› ");
 
     f.render_stateful_widget(list, area, list_state);
+}
+
+fn title_text(count: usize, focused: bool, filter: &str, filter_mode: bool) -> String {
+    let base = if filter_mode {
+        format!(" Worktrees ({count}) [/{filter}|] ")
+    } else if !filter.is_empty() {
+        format!(" Worktrees ({count}) [/{filter}] ")
+    } else {
+        format!(" Worktrees ({count}) ")
+    };
+
+    if focused && !filter_mode {
+        format!("{base}[j/k move Enter open]")
+    } else {
+        base
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::worktree::model::Lifecycle;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+    use ratatui::Terminal;
+
+    fn sample_worktree() -> Worktree {
+        Worktree::new(
+            "solo".to_string(),
+            std::path::PathBuf::from("/tmp/solo"),
+            "wt/solo".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            Lifecycle::Ephemeral,
+        )
+    }
+
+    fn render_buffer(focused: bool) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(70, 5);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
+        let worktrees = vec![sample_worktree()];
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    &worktrees,
+                    &mut list_state,
+                    focused,
+                    "",
+                    false,
+                )
+            })
+            .expect("render worktree list");
+
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        let mut line = String::new();
+        for x in 0..buffer.area.width {
+            line.push_str(buffer[(x, y)].symbol());
+        }
+        line
+    }
+
+    #[test]
+    fn focused_title_shows_navigation_hint() {
+        assert_eq!(
+            title_text(1, true, "", false),
+            " Worktrees (1) [j/k move Enter open]"
+        );
+    }
+
+    #[test]
+    fn filtered_title_keeps_filter_prompt_without_nav_hint() {
+        assert_eq!(title_text(1, true, "so", true), " Worktrees (1) [/so|] ");
+    }
+
+    #[test]
+    fn focused_selected_row_has_marker_and_strong_highlight() {
+        let buffer = render_buffer(true);
+        let first_row = row_text(&buffer, 1);
+
+        assert!(first_row.contains("›"));
+        assert_eq!(buffer[(1, 1)].bg, Color::Cyan);
+        assert_eq!(buffer[(1, 1)].fg, Color::Black);
+    }
 }
