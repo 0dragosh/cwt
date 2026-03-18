@@ -560,26 +560,31 @@ impl App {
     /// Handle a single tick: poll for events and process them.
     pub fn tick(&mut self) -> Result<()> {
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if should_process_key_event(&key) {
-                        self.handle_key(key)?;
-                    }
+            self.handle_event(event::read()?)?;
+        }
+        Ok(())
+    }
+
+    fn handle_event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Key(key) => {
+                if should_process_key_event(&key) {
+                    self.handle_key(key)?;
                 }
-                Event::Mouse(mouse) => {
-                    self.handle_mouse(mouse);
-                }
-                Event::FocusGained => {
-                    if refresh_post_create_delete_guard_on_focus_return(
-                        &mut self.suppress_delete_until,
-                        &mut self.awaiting_focus_return_after_create,
-                    ) {
-                        let _ = drain_pending_terminal_events();
-                    }
-                }
-                Event::FocusLost => {}
-                _ => {}
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
+            Event::FocusGained => {
+                if refresh_post_create_delete_guard_on_focus_return(
+                    &mut self.suppress_delete_until,
+                    &mut self.awaiting_focus_return_after_create,
+                ) {
+                    let _ = drain_pending_terminal_events();
+                }
+            }
+            Event::FocusLost => {}
+            _ => {}
         }
         Ok(())
     }
@@ -2818,26 +2823,31 @@ impl ForestApp {
     /// Handle a single tick: poll for events and process them.
     pub fn tick(&mut self) -> Result<()> {
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if should_process_key_event(&key) {
-                        self.handle_key(key)?;
-                    }
+            self.handle_event(event::read()?)?;
+        }
+        Ok(())
+    }
+
+    fn handle_event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Key(key) => {
+                if should_process_key_event(&key) {
+                    self.handle_key(key)?;
                 }
-                Event::Mouse(mouse) => {
-                    self.handle_mouse(mouse);
-                }
-                Event::FocusGained => {
-                    if refresh_post_create_delete_guard_on_focus_return(
-                        &mut self.suppress_delete_until,
-                        &mut self.awaiting_focus_return_after_create,
-                    ) {
-                        let _ = drain_pending_terminal_events();
-                    }
-                }
-                Event::FocusLost => {}
-                _ => {}
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
+            Event::FocusGained => {
+                if refresh_post_create_delete_guard_on_focus_return(
+                    &mut self.suppress_delete_until,
+                    &mut self.awaiting_focus_return_after_create,
+                ) {
+                    let _ = drain_pending_terminal_events();
+                }
+            }
+            Event::FocusLost => {}
+            _ => {}
         }
         Ok(())
     }
@@ -4178,13 +4188,83 @@ impl ForestApp {
 mod selection_tests {
     use super::{
         arm_post_create_delete_guard, clamp_selected_index, drain_pending_terminal_events_with,
-        refresh_post_create_delete_guard_on_focus_return, should_ignore_delete_shortcut,
-        should_process_key_event,
+        refresh_post_create_delete_guard_on_focus_return, ActiveDialog, App,
+        should_ignore_delete_shortcut, should_process_key_event,
     };
+    use crate::config::{Config, ConfigMeta};
+    use crate::worktree::Manager;
+    use crate::worktree::model::{Lifecycle, Worktree};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use std::cell::RefCell;
     use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
     use std::time::{Duration, Instant};
+    use tempfile::TempDir;
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git command should start");
+        assert!(
+            out.status.success(),
+            "git {} failed in {}: {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+
+    fn make_test_repo() -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().expect("create tempdir");
+        let root = tmp.path().to_path_buf();
+
+        run_git(&root, &["init"]);
+        run_git(&root, &["config", "user.email", "test@cwt.dev"]);
+        run_git(&root, &["config", "user.name", "cwt-test"]);
+        std::fs::write(root.join("README.md"), "# test repo\n").expect("write README");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "initial commit"]);
+
+        (tmp, root)
+    }
+
+    fn make_test_app(auto_launch: bool) -> (TempDir, App) {
+        let (tmp, root) = make_test_repo();
+        let mut cfg = Config::default();
+        cfg.session.auto_launch = auto_launch;
+        cfg.worktree.dir = tmp
+            .path()
+            .join("worktrees")
+            .to_string_lossy()
+            .into_owned();
+        let manager = Manager::new(root, cfg);
+        let app = App::new(manager, ConfigMeta::default()).expect("create app");
+        (tmp, app)
+    }
+
+    fn seed_selected_worktree(app: &mut App, name: &str) {
+        app.worktrees.push(Worktree::new(
+            name.to_string(),
+            PathBuf::from(name),
+            format!("wt/{name}"),
+            "main".to_string(),
+            "HEAD".to_string(),
+            Lifecycle::Ephemeral,
+        ));
+        app.list_state.select(Some(app.worktrees.len() - 1));
+    }
 
     #[test]
     fn clamp_selected_index_handles_empty_lists() {
@@ -4280,18 +4360,8 @@ mod selection_tests {
     #[test]
     fn drain_pending_terminal_events_consumes_buffered_input() {
         let events = RefCell::new(VecDeque::from([
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('d'),
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            }),
-            Event::Key(KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            }),
+            Event::Key(press(KeyCode::Char('d'))),
+            Event::Key(press(KeyCode::Enter)),
         ]));
 
         let drained = drain_pending_terminal_events_with(
@@ -4302,5 +4372,38 @@ mod selection_tests {
 
         assert_eq!(drained, 2);
         assert!(events.borrow().is_empty());
+    }
+
+    #[test]
+    fn zellij_like_focus_return_keeps_stray_delete_from_opening_dialog() {
+        let (_tmp, mut app) = make_test_app(true);
+        seed_selected_worktree(&mut app, "fresh-wt");
+
+        app.suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        app.awaiting_focus_return_after_create = true;
+
+        app.handle_event(Event::FocusGained)
+            .expect("handle focus gained");
+        app.handle_event(Event::Key(press(KeyCode::Char('d'))))
+            .expect("handle stray delete key");
+
+        assert!(
+            !matches!(app.dialog, ActiveDialog::Delete(_)),
+            "delete dialog should not open after zellij-like focus return"
+        );
+    }
+
+    #[test]
+    fn delete_still_opens_after_post_create_focus_guard_expires() {
+        let (_tmp, mut app) = make_test_app(false);
+        seed_selected_worktree(&mut app, "fresh-wt");
+
+        app.suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        app.awaiting_focus_return_after_create = false;
+
+        app.handle_event(Event::Key(press(KeyCode::Char('d'))))
+            .expect("handle delete key");
+
+        assert!(matches!(app.dialog, ActiveDialog::Delete(_)));
     }
 }
