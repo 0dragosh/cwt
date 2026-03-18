@@ -48,6 +48,8 @@ jobs:
     name: Upload ${{ matrix.target }}
     needs: release-plz
     if: needs.release-plz.outputs.releases_created == 'true'
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
