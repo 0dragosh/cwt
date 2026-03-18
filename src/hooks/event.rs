@@ -83,8 +83,11 @@ impl HookEvent {
                 context_usage_percent,
                 message,
                 ..
-            } => (*context_usage_percent)
-                .or_else(|| message.as_deref().and_then(parse_context_percent_from_message)),
+            } => (*context_usage_percent).or_else(|| {
+                message
+                    .as_deref()
+                    .and_then(parse_context_percent_from_message)
+            }),
             _ => None,
         }
     }

@@ -15,14 +15,7 @@ pub fn render(
     worktree_count: usize,
     context_usage_percent: Option<u8>,
 ) {
-    render_with_remotes(
-        f,
-        area,
-        message,
-        worktree_count,
-        &[],
-        context_usage_percent,
-    );
+    render_with_remotes(f, area, message, worktree_count, &[], context_usage_percent);
 }
 
 /// Render the status bar with optional remote host status indicators.

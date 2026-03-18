@@ -393,8 +393,11 @@ impl App {
                 context_usage_percent,
                 ..
             } => {
-                let context_percent = context_usage_percent
-                    .or_else(|| message.as_deref().and_then(parse_context_percent_from_message));
+                let context_percent = context_usage_percent.or_else(|| {
+                    message
+                        .as_deref()
+                        .and_then(parse_context_percent_from_message)
+                });
                 // Update the worktree status to Waiting
                 if let Some(wt) = self.worktrees.iter_mut().find(|wt| wt.name == worktree) {
                     wt.status = WorktreeStatus::Waiting;
