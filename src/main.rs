@@ -20,10 +20,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(
@@ -234,13 +232,7 @@ fn maybe_bootstrap_into_multiplexer(cli: &Cli) -> Result<()> {
             .args(bootstrap_tmux_args(&cwd, &exe, &args))
             .status()
             .context("failed to launch cwt inside tmux")?,
-        BootstrapTarget::Zellij => {
-            let bootstrap_shell = write_zellij_bootstrap_script(&exe, &args)?;
-            ProcessCommand::new("zellij")
-                .args(bootstrap_zellij_args(&cwd, &bootstrap_shell))
-                .status()
-                .context("failed to launch cwt inside zellij")?
-        }
+        BootstrapTarget::Zellij => launch_zellij_session(&cwd, &exe, &args)?,
     };
 
     std::process::exit(status.code().unwrap_or(1));
@@ -285,60 +277,67 @@ fn bootstrap_tmux_args(cwd: &Path, exe: &Path, args: &[OsString]) -> Vec<OsStrin
     tmux_args
 }
 
-fn bootstrap_zellij_args(cwd: &Path, bootstrap_shell: &Path) -> Vec<OsString> {
+fn launch_zellij_session(
+    cwd: &Path,
+    exe: &Path,
+    args: &[OsString],
+) -> Result<std::process::ExitStatus> {
+    if zellij_session_exists("cwt")? {
+        ProcessCommand::new("zellij")
+            .args(zellij_attach_args("cwt"))
+            .status()
+            .context("failed to attach to existing zellij session")
+    } else {
+        let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
+        ProcessCommand::new("zellij")
+            .args(zellij_new_session_args("cwt", &layout_path))
+            .status()
+            .context("failed to launch cwt in a new zellij session")
+    }
+}
+
+fn zellij_attach_args(session_name: &str) -> Vec<OsString> {
+    vec![OsString::from("attach"), OsString::from(session_name)]
+}
+
+fn zellij_new_session_args(session_name: &str, layout_path: &Path) -> Vec<OsString> {
     vec![
-        OsString::from("attach"),
-        OsString::from("-c"),
-        OsString::from("cwt"),
-        OsString::from("options"),
-        OsString::from("--default-cwd"),
-        cwd.as_os_str().to_os_string(),
-        OsString::from("--default-shell"),
-        bootstrap_shell.as_os_str().to_os_string(),
+        OsString::from("--session"),
+        OsString::from(session_name),
+        OsString::from("--layout"),
+        layout_path.as_os_str().to_os_string(),
     ]
 }
 
-fn build_zellij_bootstrap_script(exe: &Path, args: &[OsString]) -> Result<String> {
-    let exe = exe
-        .to_str()
-        .context("cwt executable path is not valid UTF-8 for zellij bootstrap")?;
-    let mut command = vec![shell_escape(exe)];
-    for arg in args {
-        let arg = arg
-            .to_str()
-            .context("cwt argument is not valid UTF-8 for zellij bootstrap")?;
-        command.push(shell_escape(arg));
+fn zellij_session_exists(session_name: &str) -> Result<bool> {
+    let output = ProcessCommand::new("zellij")
+        .args(["list-sessions", "--short", "--no-formatting"])
+        .output()
+        .context("failed to query zellij sessions")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij list-sessions failed: {}", stderr.trim());
     }
 
-    Ok(format!("#!/bin/sh\nexec {}\n", command.join(" ")))
+    Ok(zellij_session_exists_in_listing(
+        session_name,
+        &String::from_utf8_lossy(&output.stdout),
+    ))
 }
 
-fn write_zellij_bootstrap_script(exe: &Path, args: &[OsString]) -> Result<PathBuf> {
+fn zellij_session_exists_in_listing(session_name: &str, listing: &str) -> bool {
+    listing.lines().any(|line| line.trim() == session_name)
+}
+
+fn write_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> Result<PathBuf> {
     let mut path = std::env::temp_dir();
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock is before unix epoch")?
-        .as_millis();
-    path.push(format!(
-        "cwt-zellij-bootstrap-{}-{stamp}.sh",
-        std::process::id()
-    ));
+    path.push(format!("cwt-zellij-bootstrap-{}.kdl", std::process::id()));
 
-    let script = build_zellij_bootstrap_script(exe, args)?;
-    fs::write(&path, script).with_context(|| {
+    let layout = build_zellij_bootstrap_layout(cwd, exe, args)?;
+    fs::write(&path, layout).with_context(|| {
         format!(
-            "failed to write zellij bootstrap script to {}",
-            path.display()
-        )
-    })?;
-
-    let mut permissions = fs::metadata(&path)
-        .with_context(|| format!("failed to stat zellij bootstrap script {}", path.display()))?
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).with_context(|| {
-        format!(
-            "failed to make zellij bootstrap script executable at {}",
+            "failed to write zellij bootstrap layout to {}",
             path.display()
         )
     })?;
@@ -346,8 +345,36 @@ fn write_zellij_bootstrap_script(exe: &Path, args: &[OsString]) -> Result<PathBu
     Ok(path)
 }
 
-fn shell_escape(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+fn build_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> Result<String> {
+    let exe = kdl_string(
+        exe.to_str()
+            .context("cwt executable path is not valid UTF-8 for zellij bootstrap")?,
+    )?;
+    let cwd = kdl_string(
+        cwd.to_str()
+            .context("current directory is not valid UTF-8 for zellij bootstrap")?,
+    )?;
+
+    let args_line = if args.is_empty() {
+        String::new()
+    } else {
+        let mut encoded_args = Vec::with_capacity(args.len());
+        for arg in args {
+            encoded_args
+                .push(kdl_string(arg.to_str().context(
+                    "cwt argument is not valid UTF-8 for zellij bootstrap",
+                )?)?);
+        }
+        format!("        args {}\n", encoded_args.join(" "))
+    };
+
+    Ok(format!(
+        "layout {{\n    pane size=1 borderless=true {{\n        plugin location=\"tab-bar\"\n    }}\n    pane command={exe} {{\n{args_line}        cwd {cwd}\n        focus true\n    }}\n    pane size=1 borderless=true {{\n        plugin location=\"status-bar\"\n    }}\n}}\n"
+    ))
+}
+
+fn kdl_string(value: &str) -> Result<String> {
+    serde_json::to_string(value).context("failed to encode zellij layout string")
 }
 
 fn interactive_entrypoint(command: Option<&Commands>) -> bool {
@@ -1021,8 +1048,8 @@ fn run_forest_tui() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_target, bootstrap_tmux_args, bootstrap_zellij_args,
-        build_zellij_bootstrap_script, BootstrapTarget, Commands,
+        bootstrap_target, bootstrap_tmux_args, build_zellij_bootstrap_layout, zellij_attach_args,
+        zellij_new_session_args, zellij_session_exists_in_listing, BootstrapTarget, Commands,
     };
     use std::ffi::OsString;
     use std::path::Path;
@@ -1103,38 +1130,46 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_zellij_args_preserve_current_working_directory() {
-        let args = bootstrap_zellij_args(
-            Path::new("/repo/root"),
-            Path::new("/tmp/cwt-zellij-bootstrap.sh"),
-        );
+    fn zellij_attach_args_target_existing_session() {
+        let args = zellij_attach_args("cwt");
+
+        assert_eq!(args, vec![OsString::from("attach"), OsString::from("cwt"),]);
+    }
+
+    #[test]
+    fn zellij_new_session_args_use_layout_file() {
+        let args = zellij_new_session_args("cwt", Path::new("/tmp/cwt-zellij-bootstrap.kdl"));
 
         assert_eq!(
             args,
             vec![
-                OsString::from("attach"),
-                OsString::from("-c"),
+                OsString::from("--session"),
                 OsString::from("cwt"),
-                OsString::from("options"),
-                OsString::from("--default-cwd"),
-                OsString::from("/repo/root"),
-                OsString::from("--default-shell"),
-                OsString::from("/tmp/cwt-zellij-bootstrap.sh"),
+                OsString::from("--layout"),
+                OsString::from("/tmp/cwt-zellij-bootstrap.kdl"),
             ]
         );
     }
 
     #[test]
-    fn zellij_bootstrap_script_execs_the_current_binary_with_args() {
-        let script = build_zellij_bootstrap_script(
+    fn zellij_bootstrap_layout_runs_cwt_without_overriding_default_shell() {
+        let layout = build_zellij_bootstrap_layout(
+            Path::new("/repo/root"),
             Path::new("/nix/store/bin/.cwt-wrapped"),
             &[OsString::from("forest"), OsString::from("--flag")],
         )
         .unwrap();
 
         assert_eq!(
-            script,
-            "#!/bin/sh\nexec '/nix/store/bin/.cwt-wrapped' 'forest' '--flag'\n"
+            layout,
+            "layout {\n    pane size=1 borderless=true {\n        plugin location=\"tab-bar\"\n    }\n    pane command=\"/nix/store/bin/.cwt-wrapped\" {\n        args \"forest\" \"--flag\"\n        cwd \"/repo/root\"\n        focus true\n    }\n    pane size=1 borderless=true {\n        plugin location=\"status-bar\"\n    }\n}\n"
         );
+    }
+
+    #[test]
+    fn zellij_session_listing_matches_exact_session_names() {
+        let listing = "alpha\ncwt\ncwt-dev\n";
+        assert!(zellij_session_exists_in_listing("cwt", listing));
+        assert!(!zellij_session_exists_in_listing("wt", listing));
     }
 }
