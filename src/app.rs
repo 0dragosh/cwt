@@ -1,8 +1,10 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::widgets::ListState;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::model::PermissionLevel;
 use crate::config::{self, ConfigMeta};
@@ -56,6 +58,61 @@ fn clamp_selected_index(current: Option<usize>, count: usize) -> Option<usize> {
     }
 }
 
+fn should_process_key_event(key: &KeyEvent) -> bool {
+    matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+}
+
+fn should_ignore_delete_shortcut(suppress_delete_until: &mut Option<Instant>) -> bool {
+    let Some(until) = *suppress_delete_until else {
+        return false;
+    };
+
+    if Instant::now() <= until {
+        true
+    } else {
+        *suppress_delete_until = None;
+        false
+    }
+}
+
+fn arm_post_create_delete_guard(
+    suppress_delete_until: &mut Option<Instant>,
+    awaiting_focus_return: &mut bool,
+) {
+    *suppress_delete_until = Some(Instant::now() + Duration::from_secs(2));
+    *awaiting_focus_return = true;
+}
+
+fn refresh_post_create_delete_guard_on_focus_return(
+    suppress_delete_until: &mut Option<Instant>,
+    awaiting_focus_return: &mut bool,
+) -> bool {
+    if *awaiting_focus_return {
+        *suppress_delete_until = Some(Instant::now() + Duration::from_secs(2));
+        *awaiting_focus_return = false;
+        true
+    } else {
+        false
+    }
+}
+
+fn drain_pending_terminal_events() -> Result<usize> {
+    drain_pending_terminal_events_with(|| event::poll(Duration::from_millis(0)), event::read)
+        .map_err(Into::into)
+}
+
+fn drain_pending_terminal_events_with<E>(
+    mut poll: impl FnMut() -> std::result::Result<bool, E>,
+    mut read: impl FnMut() -> std::result::Result<Event, E>,
+) -> std::result::Result<usize, E> {
+    let mut drained = 0;
+    while poll()? {
+        let _ = read()?;
+        drained += 1;
+    }
+    Ok(drained)
+}
+
 /// Top-level application state.
 pub struct App {
     pub manager: Manager,
@@ -91,6 +148,10 @@ pub struct App {
     pub provider_override: Option<SessionProvider>,
     /// Metadata about the loaded config file.
     pub config_meta: ConfigMeta,
+    /// Ignore a stray delete shortcut immediately after a successful create.
+    pub suppress_delete_until: Option<Instant>,
+    /// Re-arm the post-create delete guard if focus returns after zellij/tab switching.
+    pub awaiting_focus_return_after_create: bool,
 }
 
 impl App {
@@ -144,6 +205,8 @@ impl App {
             permission_override: None,
             provider_override: None,
             config_meta,
+            suppress_delete_until: None,
+            awaiting_focus_return_after_create: false,
         };
 
         app.update_inspector();
@@ -497,15 +560,31 @@ impl App {
     /// Handle a single tick: poll for events and process them.
     pub fn tick(&mut self) -> Result<()> {
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) => {
+            self.handle_event(event::read()?)?;
+        }
+        Ok(())
+    }
+
+    fn handle_event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Key(key) => {
+                if should_process_key_event(&key) {
                     self.handle_key(key)?;
                 }
-                Event::Mouse(mouse) => {
-                    self.handle_mouse(mouse);
-                }
-                _ => {}
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
+            Event::FocusGained => {
+                if refresh_post_create_delete_guard_on_focus_return(
+                    &mut self.suppress_delete_until,
+                    &mut self.awaiting_focus_return_after_create,
+                ) {
+                    let _ = drain_pending_terminal_events();
+                }
+            }
+            Event::FocusLost => {}
+            _ => {}
         }
         Ok(())
     }
@@ -635,7 +714,9 @@ impl App {
                 self.launch_session()?;
             }
             KeyCode::Char('d') => {
-                self.open_delete_dialog()?;
+                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) {
+                    self.open_delete_dialog()?;
+                }
             }
             KeyCode::Char('h') => {
                 self.open_handoff_dialog()?;
@@ -864,6 +945,10 @@ impl App {
                         if self.manager.config.session.auto_launch {
                             let _ = self.launch_session();
                         }
+                        arm_post_create_delete_guard(
+                            &mut self.suppress_delete_until,
+                            &mut self.awaiting_focus_return_after_create,
+                        );
                     }
                     Err(e) => {
                         self.status_message = format!("Error: {}", e);
@@ -871,8 +956,10 @@ impl App {
                 }
             }
             self.dialog = ActiveDialog::None;
+            let _ = drain_pending_terminal_events();
         } else if dialog_clone.cancelled {
             self.dialog = ActiveDialog::None;
+            let _ = drain_pending_terminal_events();
         }
 
         Ok(())
@@ -1480,7 +1567,7 @@ impl App {
         };
 
         if !crate::tmux::pane::is_inside_tmux() {
-            self.status_message = "tmux required for shell panes".to_string();
+            self.status_message = "zellij or tmux required for shell panes".to_string();
             return Ok(());
         }
 
@@ -2371,6 +2458,10 @@ pub struct ForestApp {
     pub permission_override: Option<PermissionLevel>,
     /// Runtime override for provider.
     pub provider_override: Option<SessionProvider>,
+    /// Ignore a stray delete shortcut immediately after a successful create.
+    pub suppress_delete_until: Option<Instant>,
+    /// Re-arm the post-create delete guard if focus returns after zellij/tab switching.
+    pub awaiting_focus_return_after_create: bool,
 }
 
 impl ForestApp {
@@ -2430,6 +2521,8 @@ impl ForestApp {
             help_scroll: 0,
             permission_override: None,
             provider_override: None,
+            suppress_delete_until: None,
+            awaiting_focus_return_after_create: false,
         };
 
         app.update_aggregate_counts();
@@ -2730,15 +2823,31 @@ impl ForestApp {
     /// Handle a single tick: poll for events and process them.
     pub fn tick(&mut self) -> Result<()> {
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(key) => {
+            self.handle_event(event::read()?)?;
+        }
+        Ok(())
+    }
+
+    fn handle_event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Key(key) => {
+                if should_process_key_event(&key) {
                     self.handle_key(key)?;
                 }
-                Event::Mouse(mouse) => {
-                    self.handle_mouse(mouse);
-                }
-                _ => {}
             }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
+            Event::FocusGained => {
+                if refresh_post_create_delete_guard_on_focus_return(
+                    &mut self.suppress_delete_until,
+                    &mut self.awaiting_focus_return_after_create,
+                ) {
+                    let _ = drain_pending_terminal_events();
+                }
+            }
+            Event::FocusLost => {}
+            _ => {}
         }
         Ok(())
     }
@@ -2914,7 +3023,9 @@ impl ForestApp {
                 self.launch_session()?;
             }
             KeyCode::Char('d') => {
-                self.open_delete_dialog()?;
+                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) {
+                    self.open_delete_dialog()?;
+                }
             }
             KeyCode::Char('h') => {
                 self.open_handoff_dialog()?;
@@ -3119,6 +3230,10 @@ impl ForestApp {
                         self.status_message = format!("Created worktree '{}'", wt.name);
                         self.refresh();
                         self.update_inspector();
+                        arm_post_create_delete_guard(
+                            &mut self.suppress_delete_until,
+                            &mut self.awaiting_focus_return_after_create,
+                        );
                     }
                     Err(e) => {
                         self.status_message = format!("Error: {}", e);
@@ -3128,8 +3243,10 @@ impl ForestApp {
                 self.status_message = "No repo selected".to_string();
             }
             self.dialog = ActiveDialog::None;
+            let _ = drain_pending_terminal_events();
         } else if dialog_clone.cancelled {
             self.dialog = ActiveDialog::None;
+            let _ = drain_pending_terminal_events();
         }
 
         Ok(())
@@ -3792,7 +3909,7 @@ impl ForestApp {
         };
 
         if !crate::tmux::pane::is_inside_tmux() {
-            self.status_message = "tmux required for shell panes".to_string();
+            self.status_message = "zellij or tmux required for shell panes".to_string();
             return Ok(());
         }
 
@@ -4069,7 +4186,81 @@ impl ForestApp {
 
 #[cfg(test)]
 mod selection_tests {
-    use super::clamp_selected_index;
+    use super::{
+        arm_post_create_delete_guard, clamp_selected_index, drain_pending_terminal_events_with,
+        refresh_post_create_delete_guard_on_focus_return, should_ignore_delete_shortcut,
+        should_process_key_event, ActiveDialog, App,
+    };
+    use crate::config::{Config, ConfigMeta};
+    use crate::worktree::model::{Lifecycle, Worktree};
+    use crate::worktree::Manager;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+    use tempfile::TempDir;
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git command should start");
+        assert!(
+            out.status.success(),
+            "git {} failed in {}: {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+
+    fn make_test_repo() -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().expect("create tempdir");
+        let root = tmp.path().to_path_buf();
+
+        run_git(&root, &["init"]);
+        run_git(&root, &["config", "user.email", "test@cwt.dev"]);
+        run_git(&root, &["config", "user.name", "cwt-test"]);
+        std::fs::write(root.join("README.md"), "# test repo\n").expect("write README");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "initial commit"]);
+
+        (tmp, root)
+    }
+
+    fn make_test_app(auto_launch: bool) -> (TempDir, App) {
+        let (tmp, root) = make_test_repo();
+        let mut cfg = Config::default();
+        cfg.session.auto_launch = auto_launch;
+        cfg.worktree.dir = tmp.path().join("worktrees").to_string_lossy().into_owned();
+        let manager = Manager::new(root, cfg);
+        let app = App::new(manager, ConfigMeta::default()).expect("create app");
+        (tmp, app)
+    }
+
+    fn seed_selected_worktree(app: &mut App, name: &str) {
+        app.worktrees.push(Worktree::new(
+            name.to_string(),
+            PathBuf::from(name),
+            format!("wt/{name}"),
+            "main".to_string(),
+            "HEAD".to_string(),
+            Lifecycle::Ephemeral,
+        ));
+        app.list_state.select(Some(app.worktrees.len() - 1));
+    }
 
     #[test]
     fn clamp_selected_index_handles_empty_lists() {
@@ -4090,5 +4281,125 @@ mod selection_tests {
     #[test]
     fn clamp_selected_index_keeps_valid_selection() {
         assert_eq!(clamp_selected_index(Some(1), 3), Some(1));
+    }
+
+    #[test]
+    fn process_key_events_accepts_presses_and_repeats() {
+        let press = KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        let repeat = KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Repeat,
+            state: KeyEventState::NONE,
+        };
+
+        assert!(should_process_key_event(&press));
+        assert!(should_process_key_event(&repeat));
+    }
+
+    #[test]
+    fn process_key_events_ignores_key_releases() {
+        let release = KeyEvent {
+            code: KeyCode::Char('d'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        };
+
+        assert!(!should_process_key_event(&release));
+    }
+
+    #[test]
+    fn ignore_delete_shortcut_shortly_after_create() {
+        let mut suppress_delete_until = Some(Instant::now() + Duration::from_secs(2));
+        assert!(should_ignore_delete_shortcut(&mut suppress_delete_until));
+        assert!(suppress_delete_until.is_some());
+        assert!(should_ignore_delete_shortcut(&mut suppress_delete_until));
+    }
+
+    #[test]
+    fn allow_delete_shortcut_long_after_create() {
+        let mut suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        assert!(!should_ignore_delete_shortcut(&mut suppress_delete_until));
+        assert!(suppress_delete_until.is_none());
+    }
+
+    #[test]
+    fn arm_post_create_delete_guard_sets_window_and_focus_flag() {
+        let mut suppress_delete_until = None;
+        let mut awaiting_focus_return = false;
+
+        arm_post_create_delete_guard(&mut suppress_delete_until, &mut awaiting_focus_return);
+
+        assert!(suppress_delete_until.is_some());
+        assert!(awaiting_focus_return);
+    }
+
+    #[test]
+    fn refresh_post_create_delete_guard_on_focus_return_rearms_window() {
+        let mut suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        let mut awaiting_focus_return = true;
+
+        assert!(refresh_post_create_delete_guard_on_focus_return(
+            &mut suppress_delete_until,
+            &mut awaiting_focus_return,
+        ));
+        assert!(suppress_delete_until.is_some());
+        assert!(!awaiting_focus_return);
+    }
+
+    #[test]
+    fn drain_pending_terminal_events_consumes_buffered_input() {
+        let events = RefCell::new(VecDeque::from([
+            Event::Key(press(KeyCode::Char('d'))),
+            Event::Key(press(KeyCode::Enter)),
+        ]));
+
+        let drained = drain_pending_terminal_events_with(
+            || Ok::<bool, std::io::Error>(!events.borrow().is_empty()),
+            || Ok::<Event, std::io::Error>(events.borrow_mut().pop_front().unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(drained, 2);
+        assert!(events.borrow().is_empty());
+    }
+
+    #[test]
+    fn zellij_like_focus_return_keeps_stray_delete_from_opening_dialog() {
+        let (_tmp, mut app) = make_test_app(true);
+        seed_selected_worktree(&mut app, "fresh-wt");
+
+        app.suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        app.awaiting_focus_return_after_create = true;
+
+        app.handle_event(Event::FocusGained)
+            .expect("handle focus gained");
+        app.handle_event(Event::Key(press(KeyCode::Char('d'))))
+            .expect("handle stray delete key");
+
+        assert!(
+            !matches!(app.dialog, ActiveDialog::Delete(_)),
+            "delete dialog should not open after zellij-like focus return"
+        );
+    }
+
+    #[test]
+    fn delete_still_opens_after_post_create_focus_guard_expires() {
+        let (_tmp, mut app) = make_test_app(false);
+        seed_selected_worktree(&mut app, "fresh-wt");
+
+        app.suppress_delete_until = Some(Instant::now() - Duration::from_secs(1));
+        app.awaiting_focus_return_after_create = false;
+
+        app.handle_event(Event::Key(press(KeyCode::Char('d'))))
+            .expect("handle delete key");
+
+        assert!(matches!(app.dialog, ActiveDialog::Delete(_)));
     }
 }

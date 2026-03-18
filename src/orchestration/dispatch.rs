@@ -93,7 +93,9 @@ pub fn launch_with_prompt(
     permission: PermissionLevel,
 ) -> Result<String> {
     if !tmux::pane::is_inside_tmux() {
-        anyhow::bail!("cwt sessions require tmux -- please run cwt inside a tmux session");
+        anyhow::bail!(
+            "cwt sessions require an active terminal multiplexer (zellij preferred, tmux fallback)"
+        );
     }
 
     if config.provider == crate::session::provider::SessionProvider::Claude {

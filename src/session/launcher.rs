@@ -17,7 +17,9 @@ pub fn launch_session(
     permissions: &PermissionsConfig,
 ) -> Result<String> {
     if !tmux::pane::is_inside_tmux() {
-        anyhow::bail!("cwt sessions require tmux — please run cwt inside a tmux session");
+        anyhow::bail!(
+            "cwt sessions require an active terminal multiplexer (zellij preferred, tmux fallback)"
+        );
     }
 
     if config.provider == crate::session::provider::SessionProvider::Claude {
@@ -47,7 +49,9 @@ pub fn resume_session(
     permissions: &PermissionsConfig,
 ) -> Result<String> {
     if !tmux::pane::is_inside_tmux() {
-        anyhow::bail!("cwt sessions require tmux — please run cwt inside a tmux session");
+        anyhow::bail!(
+            "cwt sessions require an active terminal multiplexer (zellij preferred, tmux fallback)"
+        );
     }
 
     if config.provider == crate::session::provider::SessionProvider::Claude {

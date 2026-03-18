@@ -19,6 +19,8 @@ use crate::worktree::Manager;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 #[derive(Parser)]
@@ -123,7 +125,7 @@ enum HooksAction {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    maybe_bootstrap_into_tmux(&cli)?;
+    maybe_bootstrap_into_multiplexer(&cli)?;
 
     // Commands that don't require being in a git repo
     match &cli.command {
@@ -197,37 +199,71 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
-    let inside_tmux = crate::tmux::pane::is_inside_tmux();
+fn maybe_bootstrap_into_multiplexer(cli: &Cli) -> Result<()> {
+    let inside_multiplexer = crate::tmux::pane::is_inside_tmux();
+    let zellij_available = which::which("zellij").is_ok();
     let tmux_available = which::which("tmux").is_ok();
 
-    if !should_bootstrap_into_tmux(cli.command.as_ref(), inside_tmux, tmux_available) {
-        if interactive_entrypoint(cli.command.as_ref()) && !inside_tmux && !tmux_available {
-            eprintln!("error: cwt interactive mode requires tmux");
+    let Some(target) = bootstrap_target(
+        cli.command.as_ref(),
+        inside_multiplexer,
+        tmux_available,
+        zellij_available,
+    ) else {
+        if interactive_entrypoint(cli.command.as_ref())
+            && !inside_multiplexer
+            && !tmux_available
+            && !zellij_available
+        {
+            eprintln!("error: cwt interactive mode requires zellij or tmux");
+            eprintln!("  Install zellij: https://zellij.dev/documentation/installation");
             eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
             std::process::exit(1);
         }
 
         return Ok(());
-    }
+    };
 
     let exe = std::env::current_exe().context("failed to locate cwt executable")?;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let cwd =
-        std::env::current_dir().context("failed to get current directory for tmux bootstrap")?;
-    let status = ProcessCommand::new("tmux")
-        .args(bootstrap_tmux_args(&cwd, &exe, &args))
-        .status()
-        .context("failed to launch cwt inside tmux")?;
+    let cwd = std::env::current_dir().context("failed to get current directory for bootstrap")?;
+    let status = match target {
+        BootstrapTarget::Tmux => ProcessCommand::new("tmux")
+            .args(bootstrap_tmux_args(&cwd, &exe, &args))
+            .status()
+            .context("failed to launch cwt inside tmux")?,
+        BootstrapTarget::Zellij => launch_zellij_session(&cwd, &exe, &args)?,
+    };
 
     std::process::exit(status.code().unwrap_or(1));
 }
 
-fn bootstrap_tmux_args(
-    cwd: &std::path::Path,
-    exe: &std::path::Path,
-    args: &[OsString],
-) -> Vec<OsString> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapTarget {
+    Tmux,
+    Zellij,
+}
+
+fn bootstrap_target(
+    command: Option<&Commands>,
+    inside_multiplexer: bool,
+    tmux_available: bool,
+    zellij_available: bool,
+) -> Option<BootstrapTarget> {
+    if inside_multiplexer || !interactive_entrypoint(command) {
+        return None;
+    }
+
+    if zellij_available {
+        Some(BootstrapTarget::Zellij)
+    } else if tmux_available {
+        Some(BootstrapTarget::Tmux)
+    } else {
+        None
+    }
+}
+
+fn bootstrap_tmux_args(cwd: &Path, exe: &Path, args: &[OsString]) -> Vec<OsString> {
     let mut tmux_args = vec![
         OsString::from("new-session"),
         OsString::from("-A"),
@@ -241,12 +277,145 @@ fn bootstrap_tmux_args(
     tmux_args
 }
 
-fn should_bootstrap_into_tmux(
-    command: Option<&Commands>,
-    inside_tmux: bool,
-    tmux_available: bool,
-) -> bool {
-    !inside_tmux && tmux_available && interactive_entrypoint(command)
+fn launch_zellij_session(
+    cwd: &Path,
+    exe: &Path,
+    args: &[OsString],
+) -> Result<std::process::ExitStatus> {
+    match zellij_session_state("cwt")? {
+        Some(ZellijSessionState::Running) => ProcessCommand::new("zellij")
+            .args(zellij_attach_args("cwt"))
+            .status()
+            .context("failed to attach to existing zellij session"),
+        Some(ZellijSessionState::Exited) => {
+            delete_zellij_session("cwt")?;
+            let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
+            ProcessCommand::new("zellij")
+                .args(zellij_new_session_args("cwt", &layout_path))
+                .status()
+                .context("failed to relaunch cwt in zellij after deleting exited session")
+        }
+        None => {
+            let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
+            ProcessCommand::new("zellij")
+                .args(zellij_new_session_args("cwt", &layout_path))
+                .status()
+                .context("failed to launch cwt in a new zellij session")
+        }
+    }
+}
+
+fn zellij_attach_args(session_name: &str) -> Vec<OsString> {
+    vec![OsString::from("attach"), OsString::from(session_name)]
+}
+
+fn zellij_new_session_args(session_name: &str, layout_path: &Path) -> Vec<OsString> {
+    vec![
+        OsString::from("--new-session-with-layout"),
+        layout_path.as_os_str().to_os_string(),
+        OsString::from("--session"),
+        OsString::from(session_name),
+    ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZellijSessionState {
+    Running,
+    Exited,
+}
+
+fn zellij_session_state(session_name: &str) -> Result<Option<ZellijSessionState>> {
+    let output = ProcessCommand::new("zellij")
+        .args(["list-sessions", "--no-formatting"])
+        .output()
+        .context("failed to query zellij sessions")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij list-sessions failed: {}", stderr.trim());
+    }
+
+    Ok(zellij_session_state_in_listing(
+        session_name,
+        &String::from_utf8_lossy(&output.stdout),
+    ))
+}
+
+fn zellij_session_state_in_listing(
+    session_name: &str,
+    listing: &str,
+) -> Option<ZellijSessionState> {
+    for line in listing.lines() {
+        let trimmed = line.trim();
+        if trimmed == session_name || trimmed.starts_with(&format!("{session_name} ")) {
+            if trimmed.contains("(EXITED") {
+                return Some(ZellijSessionState::Exited);
+            }
+            return Some(ZellijSessionState::Running);
+        }
+    }
+    None
+}
+
+fn delete_zellij_session(session_name: &str) -> Result<()> {
+    let output = ProcessCommand::new("zellij")
+        .args(["delete-session", "--force", session_name])
+        .output()
+        .context("failed to delete exited zellij session")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij delete-session failed: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
+fn write_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> Result<PathBuf> {
+    let mut path = std::env::temp_dir();
+    path.push(format!("cwt-zellij-bootstrap-{}.kdl", std::process::id()));
+
+    let layout = build_zellij_bootstrap_layout(cwd, exe, args)?;
+    fs::write(&path, layout).with_context(|| {
+        format!(
+            "failed to write zellij bootstrap layout to {}",
+            path.display()
+        )
+    })?;
+
+    Ok(path)
+}
+
+fn build_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> Result<String> {
+    let exe = kdl_string(
+        exe.to_str()
+            .context("cwt executable path is not valid UTF-8 for zellij bootstrap")?,
+    )?;
+    let cwd = kdl_string(
+        cwd.to_str()
+            .context("current directory is not valid UTF-8 for zellij bootstrap")?,
+    )?;
+
+    let args_line = if args.is_empty() {
+        String::new()
+    } else {
+        let mut encoded_args = Vec::with_capacity(args.len());
+        for arg in args {
+            encoded_args
+                .push(kdl_string(arg.to_str().context(
+                    "cwt argument is not valid UTF-8 for zellij bootstrap",
+                )?)?);
+        }
+        format!("        args {}\n", encoded_args.join(" "))
+    };
+
+    Ok(format!(
+        "layout {{\n    pane size=1 borderless=true {{\n        plugin location=\"tab-bar\"\n    }}\n    pane command={exe} {{\n{args_line}        cwd {cwd}\n        focus true\n    }}\n    pane size=1 borderless=true {{\n        plugin location=\"status-bar\"\n    }}\n}}\n"
+    ))
+}
+
+fn kdl_string(value: &str) -> Result<String> {
+    serde_json::to_string(value).context("failed to encode zellij layout string")
 }
 
 fn interactive_entrypoint(command: Option<&Commands>) -> bool {
@@ -263,7 +432,8 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     crossterm::execute!(
         stdout,
         crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
@@ -326,7 +496,8 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     crossterm::execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange
     )?;
     terminal.show_cursor()?;
 
@@ -346,10 +517,11 @@ fn startup_checks() -> Result<()> {
         std::process::exit(1);
     }
 
-    // Check that tmux is available (warn but don't block)
-    if which::which("tmux").is_err() {
-        eprintln!("warning: tmux not found on PATH");
-        eprintln!("  Session launching requires tmux.");
+    // Check multiplexer availability (warn but don't block)
+    if which::which("zellij").is_err() && which::which("tmux").is_err() {
+        eprintln!("warning: neither zellij nor tmux found on PATH");
+        eprintln!("  Session launching requires a terminal multiplexer.");
+        eprintln!("  Install zellij: https://zellij.dev/documentation/installation");
         eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
         eprintln!();
     }
@@ -638,10 +810,10 @@ fn cmd_dispatch(manager: &Manager, tasks: &[String], base: &str) -> Result<()> {
         std::process::exit(1);
     }
 
-    // Check tmux
+    // Check multiplexer
     if !crate::tmux::pane::is_inside_tmux() {
-        eprintln!("error: cwt dispatch requires tmux");
-        eprintln!("  Run cwt inside a tmux session to dispatch tasks.");
+        eprintln!("error: cwt dispatch requires an active multiplexer session");
+        eprintln!("  Run cwt inside zellij (preferred) or tmux to dispatch tasks.");
         std::process::exit(1);
     }
 
@@ -692,10 +864,10 @@ fn cmd_import(
         std::process::exit(1);
     }
 
-    // Check tmux
+    // Check multiplexer
     if !crate::tmux::pane::is_inside_tmux() {
-        eprintln!("error: cwt import requires tmux");
-        eprintln!("  Run cwt inside a tmux session to import issues.");
+        eprintln!("error: cwt import requires an active multiplexer session");
+        eprintln!("  Run cwt inside zellij (preferred) or tmux to import issues.");
         std::process::exit(1);
     }
 
@@ -869,7 +1041,8 @@ fn run_forest_tui() -> Result<()> {
     crossterm::execute!(
         stdout,
         crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
@@ -906,7 +1079,8 @@ fn run_forest_tui() -> Result<()> {
     crossterm::execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange
     )?;
     terminal.show_cursor()?;
 
@@ -918,48 +1092,64 @@ fn run_forest_tui() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bootstrap_tmux_args, should_bootstrap_into_tmux, Commands};
+    use super::{
+        bootstrap_target, bootstrap_tmux_args, build_zellij_bootstrap_layout, zellij_attach_args,
+        zellij_new_session_args, zellij_session_state_in_listing, BootstrapTarget, Commands,
+        ZellijSessionState,
+    };
     use std::ffi::OsString;
     use std::path::Path;
 
     #[test]
-    fn bootstraps_default_tui_entrypoint_outside_tmux() {
-        assert!(should_bootstrap_into_tmux(None, false, true));
+    fn bootstraps_default_tui_entrypoint_into_zellij_when_available() {
+        assert_eq!(
+            bootstrap_target(None, false, true, true),
+            Some(BootstrapTarget::Zellij)
+        );
+    }
+
+    #[test]
+    fn bootstraps_default_tui_entrypoint_into_tmux_as_fallback() {
+        assert_eq!(
+            bootstrap_target(None, false, true, false),
+            Some(BootstrapTarget::Tmux)
+        );
     }
 
     #[test]
     fn bootstraps_explicit_interactive_entrypoints_only() {
-        assert!(should_bootstrap_into_tmux(
-            Some(&Commands::Tui),
-            false,
-            true
-        ));
-        assert!(should_bootstrap_into_tmux(
-            Some(&Commands::Forest),
-            false,
-            true
-        ));
-        assert!(!should_bootstrap_into_tmux(
-            Some(&Commands::List),
-            false,
-            true
-        ));
-        assert!(!should_bootstrap_into_tmux(
-            Some(&Commands::Create {
-                name: None,
-                base: "main".to_string(),
-                carry: false,
-                remote: None,
-            }),
-            false,
-            true,
-        ));
+        assert_eq!(
+            bootstrap_target(Some(&Commands::Tui), false, true, false),
+            Some(BootstrapTarget::Tmux)
+        );
+        assert_eq!(
+            bootstrap_target(Some(&Commands::Forest), false, true, true),
+            Some(BootstrapTarget::Zellij)
+        );
+        assert_eq!(
+            bootstrap_target(Some(&Commands::List), false, true, true),
+            None
+        );
+        assert_eq!(
+            bootstrap_target(
+                Some(&Commands::Create {
+                    name: None,
+                    base: "main".to_string(),
+                    carry: false,
+                    remote: None,
+                }),
+                false,
+                true,
+                true,
+            ),
+            None,
+        );
     }
 
     #[test]
     fn skips_bootstrap_when_tmux_is_unavailable_or_already_active() {
-        assert!(!should_bootstrap_into_tmux(None, true, true));
-        assert!(!should_bootstrap_into_tmux(None, false, false));
+        assert_eq!(bootstrap_target(None, true, true, true), None);
+        assert_eq!(bootstrap_target(None, false, false, false), None);
     }
 
     #[test]
@@ -982,6 +1172,62 @@ mod tests {
                 OsString::from("/nix/store/bin/.cwt-wrapped"),
                 OsString::from("tui"),
             ]
+        );
+    }
+
+    #[test]
+    fn zellij_attach_args_target_existing_session() {
+        let args = zellij_attach_args("cwt");
+
+        assert_eq!(args, vec![OsString::from("attach"), OsString::from("cwt"),]);
+    }
+
+    #[test]
+    fn zellij_new_session_args_use_layout_file() {
+        let args = zellij_new_session_args("cwt", Path::new("/tmp/cwt-zellij-bootstrap.kdl"));
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("--new-session-with-layout"),
+                OsString::from("/tmp/cwt-zellij-bootstrap.kdl"),
+                OsString::from("--session"),
+                OsString::from("cwt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn zellij_bootstrap_layout_runs_cwt_without_overriding_default_shell() {
+        let layout = build_zellij_bootstrap_layout(
+            Path::new("/repo/root"),
+            Path::new("/nix/store/bin/.cwt-wrapped"),
+            &[OsString::from("forest"), OsString::from("--flag")],
+        )
+        .unwrap();
+
+        assert_eq!(
+            layout,
+            "layout {\n    pane size=1 borderless=true {\n        plugin location=\"tab-bar\"\n    }\n    pane command=\"/nix/store/bin/.cwt-wrapped\" {\n        args \"forest\" \"--flag\"\n        cwd \"/repo/root\"\n        focus true\n    }\n    pane size=1 borderless=true {\n        plugin location=\"status-bar\"\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn zellij_session_listing_matches_exact_session_names() {
+        let listing = "alpha [Created 1m ago]\ncwt [Created 2m ago]\ncwt-dev [Created 3m ago]\n";
+        assert_eq!(
+            zellij_session_state_in_listing("cwt", listing),
+            Some(ZellijSessionState::Running)
+        );
+        assert_eq!(zellij_session_state_in_listing("wt", listing), None);
+    }
+
+    #[test]
+    fn zellij_session_listing_detects_exited_sessions() {
+        let listing = "cwt [Created 2m ago] (EXITED - attach to resurrect)\n";
+        assert_eq!(
+            zellij_session_state_in_listing("cwt", listing),
+            Some(ZellijSessionState::Exited)
         );
     }
 }

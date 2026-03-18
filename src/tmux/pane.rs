@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Information about a tmux pane.
 #[derive(Debug, Clone)]
@@ -13,122 +15,191 @@ pub struct PaneInfo {
 
 /// Check if we're currently running inside a tmux session.
 pub fn is_inside_tmux() -> bool {
-    inside_tmux_with_probe(std::env::var_os("TMUX").as_deref(), probe_tmux_client)
+    active_multiplexer(
+        std::env::var_os("ZELLIJ").as_deref(),
+        std::env::var_os("ZELLIJ_SESSION_NAME").as_deref(),
+        std::env::var_os("TMUX").as_deref(),
+        is_inside_zellij,
+        probe_tmux_client,
+    )
+    .is_some()
 }
 
 /// Get the current tmux session name.
 pub fn current_session() -> Result<String> {
-    let output = tmux(&["display-message", "-p", "#{session_name}"])?;
-    Ok(output.trim().to_string())
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            Ok(std::env::var("ZELLIJ_SESSION_NAME").unwrap_or_else(|_| "zellij".to_string()))
+        }
+        Multiplexer::Tmux => {
+            let output = tmux(&["display-message", "-p", "#{session_name}"])?;
+            Ok(output.trim().to_string())
+        }
+    }
 }
 
 /// Create a new tmux pane and run a command in it.
 /// Returns the pane ID (e.g., "%5").
 pub fn create_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Result<String> {
-    let path_str = worktree_path
-        .to_str()
-        .context("worktree path is not valid UTF-8")?;
-
-    let shell_cmd = format!("cd {} && {}", shell_escape(path_str), command);
-
-    let output = tmux(&[
-        "new-window",
-        "-d", // don't switch focus yet
-        "-P",
-        "-F",
-        "#{pane_id}",
-        "-n",
-        pane_title, // set window name
-        &shell_cmd,
-    ])?;
-
-    let pane_id = output.trim().to_string();
-
-    // Set the pane title
-    let _ = tmux(&["select-pane", "-t", &pane_id, "-T", pane_title]);
-
-    Ok(pane_id)
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => create_zellij_pane(worktree_path, command, pane_title),
+        Multiplexer::Tmux => create_tmux_pane(worktree_path, command, pane_title),
+    }
 }
 
 /// Focus (select) an existing tmux pane by switching to its window first.
 pub fn focus_pane(pane_id: &str) -> Result<()> {
-    tmux(&["select-window", "-t", pane_id])?;
-    tmux(&["select-pane", "-t", pane_id])?;
-    Ok(())
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let tab_name = decode_zellij_tab_name(pane_id)?;
+            zellij_action(&["go-to-tab-name", &tab_name])?;
+            Ok(())
+        }
+        Multiplexer::Tmux => {
+            tmux(&["select-window", "-t", pane_id])?;
+            tmux(&["select-pane", "-t", pane_id])?;
+            Ok(())
+        }
+    }
 }
 
 /// Kill a tmux pane.
 pub fn kill_pane(pane_id: &str) -> Result<()> {
-    tmux(&["kill-pane", "-t", pane_id])?;
-    Ok(())
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let tab_name = decode_zellij_tab_name(pane_id)?;
+            zellij_action(&["go-to-tab-name", &tab_name])?;
+            zellij_action(&["close-tab"])?;
+            Ok(())
+        }
+        Multiplexer::Tmux => {
+            tmux(&["kill-pane", "-t", pane_id])?;
+            Ok(())
+        }
+    }
 }
 
 /// Check if a pane is still alive by querying its pane_id.
 /// Returns false if the pane doesn't exist or if tmux itself is not running.
 pub fn pane_exists(pane_id: &str) -> bool {
-    match Command::new("tmux")
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_id}"])
-        .output()
-    {
-        Ok(o) => o.status.success(),
-        Err(e) => {
-            eprintln!("cwt: tmux query failed for pane {}: {}", pane_id, e);
-            false
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let Ok(tab_name) = decode_zellij_tab_name(pane_id) else {
+                return false;
+            };
+            zellij_tab_exists(&tab_name)
         }
+        Multiplexer::Tmux => match Command::new("tmux")
+            .args(["display-message", "-t", pane_id, "-p", "#{pane_id}"])
+            .output()
+        {
+            Ok(o) => o.status.success(),
+            Err(e) => {
+                eprintln!("cwt: tmux query failed for pane {}: {}", pane_id, e);
+                false
+            }
+        },
     }
 }
 
 /// Get the current command running in a pane.
 pub fn pane_current_command(pane_id: &str) -> Result<String> {
-    let output = tmux(&[
-        "display-message",
-        "-t",
-        pane_id,
-        "-p",
-        "#{pane_current_command}",
-    ])?;
-    Ok(output.trim().to_string())
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let tab_name = decode_zellij_tab_name(pane_id)?;
+            if zellij_tab_exists(&tab_name) {
+                Ok("zellij".to_string())
+            } else {
+                anyhow::bail!("zellij tab '{}' does not exist", tab_name);
+            }
+        }
+        Multiplexer::Tmux => {
+            let output = tmux(&[
+                "display-message",
+                "-t",
+                pane_id,
+                "-p",
+                "#{pane_current_command}",
+            ])?;
+            Ok(output.trim().to_string())
+        }
+    }
 }
 
 /// List all panes in the current tmux session with their info.
 pub fn list_panes() -> Result<Vec<PaneInfo>> {
-    let output = tmux(&[
-        "list-panes",
-        "-s", // all panes in session
-        "-F",
-        "#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_active}",
-    ])?;
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let output = zellij_action(&["query-tab-names"])?;
+            let mut panes = Vec::new();
+            for line in output
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+            {
+                panes.push(PaneInfo {
+                    pane_id: encode_zellij_tab_name(line),
+                    pane_title: line.to_string(),
+                    current_command: "zellij".to_string(),
+                    is_active: false,
+                });
+            }
+            Ok(panes)
+        }
+        Multiplexer::Tmux => {
+            let output = tmux(&[
+                "list-panes",
+                "-s", // all panes in session
+                "-F",
+                "#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_active}",
+            ])?;
 
-    let mut panes = Vec::new();
-    for line in output.lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 4 {
-            panes.push(PaneInfo {
-                pane_id: parts[0].to_string(),
-                pane_title: parts[1].to_string(),
-                current_command: parts[2].to_string(),
-                is_active: parts[3] == "1",
-            });
+            let mut panes = Vec::new();
+            for line in output.lines() {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 4 {
+                    panes.push(PaneInfo {
+                        pane_id: parts[0].to_string(),
+                        pane_title: parts[1].to_string(),
+                        current_command: parts[2].to_string(),
+                        is_active: parts[3] == "1",
+                    });
+                }
+            }
+            Ok(panes)
         }
     }
-
-    Ok(panes)
 }
 
 /// Get the PID of the process running in a pane.
 pub fn pane_pid(pane_id: &str) -> Result<u32> {
-    let output = tmux(&["display-message", "-t", pane_id, "-p", "#{pane_pid}"])?;
-    let pid: u32 = output
-        .trim()
-        .parse()
-        .with_context(|| format!("invalid pid for pane {}", pane_id))?;
-    Ok(pid)
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => anyhow::bail!("pane pid is not supported for zellij backend"),
+        Multiplexer::Tmux => {
+            let output = tmux(&["display-message", "-t", pane_id, "-p", "#{pane_pid}"])?;
+            let pid: u32 = output
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid pid for pane {}", pane_id))?;
+            Ok(pid)
+        }
+    }
 }
 
 /// Send keys to a pane (e.g., for sending input).
 pub fn send_keys(pane_id: &str, keys: &str) -> Result<()> {
-    tmux(&["send-keys", "-t", pane_id, keys, "Enter"])?;
-    Ok(())
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            let tab_name = decode_zellij_tab_name(pane_id)?;
+            zellij_action(&["go-to-tab-name", &tab_name])?;
+            zellij_action(&["write-chars", &format!("{}\n", keys)])?;
+            Ok(())
+        }
+        Multiplexer::Tmux => {
+            tmux(&["send-keys", "-t", pane_id, keys, "Enter"])?;
+            Ok(())
+        }
+    }
 }
 
 /// Run a tmux command and return stdout.
@@ -144,6 +215,182 @@ fn tmux(args: &[&str]) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Multiplexer {
+    Zellij,
+    Tmux,
+}
+
+fn preferred_multiplexer() -> Multiplexer {
+    if let Some(active) = active_multiplexer(
+        std::env::var_os("ZELLIJ").as_deref(),
+        std::env::var_os("ZELLIJ_SESSION_NAME").as_deref(),
+        std::env::var_os("TMUX").as_deref(),
+        is_inside_zellij,
+        probe_tmux_client,
+    ) {
+        return active;
+    }
+
+    if command_available("zellij") {
+        Multiplexer::Zellij
+    } else {
+        Multiplexer::Tmux
+    }
+}
+
+fn active_multiplexer(
+    zellij_env: Option<&std::ffi::OsStr>,
+    zellij_session_env: Option<&std::ffi::OsStr>,
+    tmux_env: Option<&std::ffi::OsStr>,
+    probe_zellij: impl FnOnce() -> bool,
+    probe_tmux: impl FnOnce() -> bool,
+) -> Option<Multiplexer> {
+    if (matches!(zellij_env, Some(value) if !value.is_empty())
+        || matches!(zellij_session_env, Some(value) if !value.is_empty()))
+        && probe_zellij()
+    {
+        return Some(Multiplexer::Zellij);
+    }
+
+    if inside_tmux_with_probe(tmux_env, probe_tmux) {
+        return Some(Multiplexer::Tmux);
+    }
+
+    None
+}
+
+fn command_available(command: &str) -> bool {
+    Command::new(command)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn is_inside_zellij() -> bool {
+    std::env::var_os("ZELLIJ").is_some() || std::env::var_os("ZELLIJ_SESSION_NAME").is_some()
+}
+
+fn create_tmux_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Result<String> {
+    let path_str = worktree_path
+        .to_str()
+        .context("worktree path is not valid UTF-8")?;
+
+    let shell_cmd = format!("cd {} && {}", shell_escape(path_str), command);
+
+    let output = tmux(&[
+        "new-window",
+        "-d", // don't switch focus yet
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-n",
+        pane_title,
+        &shell_cmd,
+    ])?;
+
+    let pane_id = output.trim().to_string();
+    let _ = tmux(&["select-pane", "-t", &pane_id, "-T", pane_title]);
+    Ok(pane_id)
+}
+
+fn create_zellij_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Result<String> {
+    let tab_name = format!("{}-{}", pane_title, unix_timestamp_millis());
+    let layout_path = write_zellij_command_layout(worktree_path, command, pane_title)?;
+    let layout_str = layout_path
+        .to_str()
+        .context("zellij layout path is not valid UTF-8")?;
+    let launch_result = zellij_action(&["new-tab", "--layout", layout_str, "--name", &tab_name]);
+    let _ = fs::remove_file(&layout_path);
+    launch_result?;
+
+    Ok(encode_zellij_tab_name(&tab_name))
+}
+
+fn write_zellij_command_layout(
+    worktree_path: &Path,
+    command: &str,
+    pane_title: &str,
+) -> Result<std::path::PathBuf> {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "cwt-zellij-pane-{}-{}.kdl",
+        std::process::id(),
+        unix_timestamp_millis()
+    ));
+
+    let layout = build_zellij_command_layout(worktree_path, command, pane_title)?;
+    fs::write(&path, layout)
+        .with_context(|| format!("failed to write zellij pane layout to {}", path.display()))?;
+
+    Ok(path)
+}
+
+fn build_zellij_command_layout(
+    worktree_path: &Path,
+    command: &str,
+    pane_title: &str,
+) -> Result<String> {
+    let worktree_path = worktree_path
+        .to_str()
+        .context("worktree path is not valid UTF-8")?;
+    let shell_command = build_shell_cmd(worktree_path, command);
+    let pane_title = kdl_string(pane_title)?;
+    let shell_command = kdl_string(&shell_command)?;
+
+    Ok(format!(
+        "layout {{\n    pane name={pane_title} command=\"sh\" {{\n        args \"-lc\" {shell_command}\n        focus true\n    }}\n}}\n"
+    ))
+}
+
+fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn zellij_action(args: &[&str]) -> Result<String> {
+    let output = Command::new("zellij")
+        .arg("action")
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run zellij action {}", args.join(" ")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij action {} failed: {}", args.join(" "), stderr.trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn encode_zellij_tab_name(tab_name: &str) -> String {
+    format!("zellij-tab:{tab_name}")
+}
+
+fn kdl_string(value: &str) -> Result<String> {
+    serde_json::to_string(value).context("failed to encode zellij layout string")
+}
+
+fn decode_zellij_tab_name(pane_id: &str) -> Result<String> {
+    let Some(tab_name) = pane_id.strip_prefix("zellij-tab:") else {
+        anyhow::bail!("invalid zellij pane id '{pane_id}'");
+    };
+    Ok(tab_name.to_string())
+}
+
+fn zellij_tab_exists(tab_name: &str) -> bool {
+    let output = match zellij_action(&["query-tab-names"]) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("cwt: zellij query-tab-names failed: {err}");
+            return false;
+        }
+    };
+    output.lines().map(str::trim).any(|line| line == tab_name)
 }
 
 fn inside_tmux_with_probe(
@@ -166,8 +413,6 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// Build the shell command that will be executed in the tmux window.
-#[cfg(test)]
 fn build_shell_cmd(worktree_path: &str, command: &str) -> String {
     format!("cd {} && {}", shell_escape(worktree_path), command)
 }
@@ -217,6 +462,23 @@ mod tests {
     }
 
     #[test]
+    fn build_zellij_command_layout_runs_provider_without_typing_chars() {
+        let layout = build_zellij_command_layout(
+            Path::new("/tmp/test-wt"),
+            "claude --resume sess-123",
+            "cwt:wt-test",
+        )
+        .unwrap();
+
+        assert!(layout.contains("pane name=\"cwt:wt-test\" command=\"sh\""));
+        assert!(layout.contains("args \"-lc\" \"cd '/tmp/test-wt' && claude --resume sess-123\""));
+        assert!(
+            !layout.contains("write-chars"),
+            "layout launch should not synthesize provider keystrokes"
+        );
+    }
+
+    #[test]
     fn stale_tmux_env_does_not_count_as_running_inside_tmux() {
         assert!(!inside_tmux_with_probe(
             Some(OsStr::new("/tmp/tmux-501/default,123,0")),
@@ -230,6 +492,26 @@ mod tests {
             Some(OsStr::new("/tmp/tmux-501/default,123,0")),
             || true,
         ));
+    }
+
+    #[test]
+    fn active_tmux_session_beats_zellij_installation() {
+        let multiplexer = active_multiplexer(
+            None,
+            None,
+            Some(OsStr::new("/tmp/tmux-501/default,123,0")),
+            || false,
+            || true,
+        );
+
+        assert_eq!(multiplexer, Some(Multiplexer::Tmux));
+    }
+
+    #[test]
+    fn active_zellij_session_is_detected_without_tmux() {
+        let multiplexer = active_multiplexer(Some(OsStr::new("0")), None, None, || true, || false);
+
+        assert_eq!(multiplexer, Some(Multiplexer::Zellij));
     }
 
     #[test]
