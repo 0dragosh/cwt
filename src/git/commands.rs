@@ -150,6 +150,31 @@ pub fn repo_root(path: &Path) -> Result<PathBuf> {
     Ok(PathBuf::from(output.trim()))
 }
 
+/// Get the canonical "common" repo root directory for a worktree or main checkout.
+///
+/// Unlike `repo_root`, this resolves to the shared repository root even when called
+/// from inside a linked worktree.
+pub fn common_repo_root(path: &Path) -> Result<PathBuf> {
+    let output = git(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    repo_root_from_common_dir(Path::new(output.trim()))
+}
+
+fn repo_root_from_common_dir(common_dir: &Path) -> Result<PathBuf> {
+    let git_dir_name = std::ffi::OsStr::new(".git");
+    if common_dir.file_name() == Some(git_dir_name) {
+        return common_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .context("git common dir has no parent");
+    }
+
+    // Fallback for unusual layouts (e.g., bare repos): use the common dir as-is.
+    Ok(common_dir.to_path_buf())
+}
+
 /// Get the HEAD commit hash.
 pub fn head_commit(repo_root: &Path) -> Result<String> {
     let output = git(repo_root, &["rev-parse", "HEAD"])?;
@@ -256,5 +281,17 @@ bare
         let wts = parse_porcelain(input).unwrap();
         assert_eq!(wts.len(), 1);
         assert!(wts[0].is_bare);
+    }
+
+    #[test]
+    fn test_repo_root_from_common_dir_standard() {
+        let root = repo_root_from_common_dir(Path::new("/tmp/proj/.git")).unwrap();
+        assert_eq!(root, PathBuf::from("/tmp/proj"));
+    }
+
+    #[test]
+    fn test_repo_root_from_common_dir_bare_fallback() {
+        let root = repo_root_from_common_dir(Path::new("/tmp/proj.git")).unwrap();
+        assert_eq!(root, PathBuf::from("/tmp/proj.git"));
     }
 }

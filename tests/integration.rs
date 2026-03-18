@@ -256,6 +256,25 @@ fn test_list_empty() {
 }
 
 #[test]
+fn test_prompt_prints_worktree_name_inside_managed_worktree() {
+    let (_tmp, root) = make_test_repo();
+    run_cwt_ok(&root, &["create", "wt-prompt", "--base", "main"]);
+
+    let wt_path = root.join(".claude/worktrees/wt-prompt");
+    let (stdout, _stderr, ok) = run_cwt(&wt_path, &["prompt"]);
+    assert!(ok, "cwt prompt failed: {_stderr}");
+    assert_eq!(stdout.trim(), "wt-prompt");
+}
+
+#[test]
+fn test_prompt_is_empty_outside_git_repo() {
+    let dir = TempDir::new().expect("create tempdir");
+    let (stdout, _stderr, ok) = run_cwt(dir.path(), &["prompt"]);
+    assert!(ok, "cwt prompt should be non-fatal outside repo: {_stderr}");
+    assert!(stdout.trim().is_empty(), "expected empty prompt output");
+}
+
+#[test]
 fn test_promote_worktree() {
     let (_tmp, root) = make_test_repo();
     run_cwt_ok(&root, &["create", "promo-wt", "--base", "main"]);

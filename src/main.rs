@@ -107,6 +107,8 @@ enum Commands {
         #[arg(short, long, default_value = "main")]
         base: String,
     },
+    /// Print prompt context for shell integrations (e.g. starship)
+    Prompt,
 }
 
 #[derive(Subcommand)]
@@ -127,6 +129,10 @@ fn main() -> Result<()> {
     match &cli.command {
         Some(Commands::AddRepo { path }) => {
             return cmd_add_repo(path);
+        }
+        Some(Commands::Prompt) => {
+            let cwd = std::env::current_dir().context("failed to get current directory")?;
+            return cmd_prompt(&cwd);
         }
         Some(Commands::Forest) => {
             return run_forest_tui();
@@ -181,6 +187,7 @@ fn main() -> Result<()> {
             limit,
             base,
         }) => cmd_import(&manager, github, linear, limit, &base)?,
+        Some(Commands::Prompt) => unreachable!(),
         // Already handled above
         Some(Commands::AddRepo { .. }) | Some(Commands::Forest) | Some(Commands::Status) => {
             unreachable!()
@@ -400,6 +407,32 @@ fn cmd_list(manager: &Manager) -> Result<()> {
     }
 
     println!("\n{} worktree(s)", worktrees.len());
+    Ok(())
+}
+
+fn cmd_prompt(cwd: &std::path::Path) -> Result<()> {
+    // Prompt integration should be safe to call from any directory.
+    let repo_root = match git::commands::common_repo_root(cwd) {
+        Ok(root) => root,
+        Err(_) => return Ok(()),
+    };
+
+    let config = config::load_config(&repo_root)?;
+    let manager = Manager::new(repo_root.clone(), config);
+    let worktrees = manager.list()?;
+
+    for wt in &worktrees {
+        // Prompt should only show local worktrees.
+        if wt.is_remote() {
+            continue;
+        }
+        let wt_abs = manager.worktree_abs_path(wt);
+        if cwd == wt_abs || cwd.starts_with(&wt_abs) {
+            println!("{}", wt.name);
+            break;
+        }
+    }
+
     Ok(())
 }
 
