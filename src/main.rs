@@ -19,7 +19,11 @@ use crate::worktree::Manager;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(
@@ -123,7 +127,7 @@ enum HooksAction {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    maybe_bootstrap_into_tmux(&cli)?;
+    maybe_bootstrap_into_multiplexer(&cli)?;
 
     // Commands that don't require being in a git repo
     match &cli.command {
@@ -197,19 +201,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
-    let inside_tmux = crate::tmux::pane::is_inside_tmux();
+fn maybe_bootstrap_into_multiplexer(cli: &Cli) -> Result<()> {
+    let inside_multiplexer = crate::tmux::pane::is_inside_tmux();
     let zellij_available = which::which("zellij").is_ok();
     let tmux_available = which::which("tmux").is_ok();
 
-    if !should_bootstrap_into_tmux(
+    let Some(target) = bootstrap_target(
         cli.command.as_ref(),
-        inside_tmux,
+        inside_multiplexer,
         tmux_available,
         zellij_available,
-    ) {
+    ) else {
         if interactive_entrypoint(cli.command.as_ref())
-            && !inside_tmux
+            && !inside_multiplexer
             && !tmux_available
             && !zellij_available
         {
@@ -220,25 +224,54 @@ fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
         }
 
         return Ok(());
-    }
+    };
 
     let exe = std::env::current_exe().context("failed to locate cwt executable")?;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let cwd =
-        std::env::current_dir().context("failed to get current directory for tmux bootstrap")?;
-    let status = ProcessCommand::new("tmux")
-        .args(bootstrap_tmux_args(&cwd, &exe, &args))
-        .status()
-        .context("failed to launch cwt inside tmux")?;
+    let cwd = std::env::current_dir().context("failed to get current directory for bootstrap")?;
+    let status = match target {
+        BootstrapTarget::Tmux => ProcessCommand::new("tmux")
+            .args(bootstrap_tmux_args(&cwd, &exe, &args))
+            .status()
+            .context("failed to launch cwt inside tmux")?,
+        BootstrapTarget::Zellij => {
+            let bootstrap_shell = write_zellij_bootstrap_script(&exe, &args)?;
+            ProcessCommand::new("zellij")
+                .args(bootstrap_zellij_args(&cwd, &bootstrap_shell))
+                .status()
+                .context("failed to launch cwt inside zellij")?
+        }
+    };
 
     std::process::exit(status.code().unwrap_or(1));
 }
 
-fn bootstrap_tmux_args(
-    cwd: &std::path::Path,
-    exe: &std::path::Path,
-    args: &[OsString],
-) -> Vec<OsString> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapTarget {
+    Tmux,
+    Zellij,
+}
+
+fn bootstrap_target(
+    command: Option<&Commands>,
+    inside_multiplexer: bool,
+    tmux_available: bool,
+    zellij_available: bool,
+) -> Option<BootstrapTarget> {
+    if inside_multiplexer || !interactive_entrypoint(command) {
+        return None;
+    }
+
+    if zellij_available {
+        Some(BootstrapTarget::Zellij)
+    } else if tmux_available {
+        Some(BootstrapTarget::Tmux)
+    } else {
+        None
+    }
+}
+
+fn bootstrap_tmux_args(cwd: &Path, exe: &Path, args: &[OsString]) -> Vec<OsString> {
     let mut tmux_args = vec![
         OsString::from("new-session"),
         OsString::from("-A"),
@@ -252,13 +285,69 @@ fn bootstrap_tmux_args(
     tmux_args
 }
 
-fn should_bootstrap_into_tmux(
-    command: Option<&Commands>,
-    inside_tmux: bool,
-    tmux_available: bool,
-    zellij_available: bool,
-) -> bool {
-    !inside_tmux && !zellij_available && tmux_available && interactive_entrypoint(command)
+fn bootstrap_zellij_args(cwd: &Path, bootstrap_shell: &Path) -> Vec<OsString> {
+    vec![
+        OsString::from("attach"),
+        OsString::from("-c"),
+        OsString::from("cwt"),
+        OsString::from("options"),
+        OsString::from("--default-cwd"),
+        cwd.as_os_str().to_os_string(),
+        OsString::from("--default-shell"),
+        bootstrap_shell.as_os_str().to_os_string(),
+    ]
+}
+
+fn build_zellij_bootstrap_script(exe: &Path, args: &[OsString]) -> Result<String> {
+    let exe = exe
+        .to_str()
+        .context("cwt executable path is not valid UTF-8 for zellij bootstrap")?;
+    let mut command = vec![shell_escape(exe)];
+    for arg in args {
+        let arg = arg
+            .to_str()
+            .context("cwt argument is not valid UTF-8 for zellij bootstrap")?;
+        command.push(shell_escape(arg));
+    }
+
+    Ok(format!("#!/bin/sh\nexec {}\n", command.join(" ")))
+}
+
+fn write_zellij_bootstrap_script(exe: &Path, args: &[OsString]) -> Result<PathBuf> {
+    let mut path = std::env::temp_dir();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before unix epoch")?
+        .as_millis();
+    path.push(format!(
+        "cwt-zellij-bootstrap-{}-{stamp}.sh",
+        std::process::id()
+    ));
+
+    let script = build_zellij_bootstrap_script(exe, args)?;
+    fs::write(&path, script).with_context(|| {
+        format!(
+            "failed to write zellij bootstrap script to {}",
+            path.display()
+        )
+    })?;
+
+    let mut permissions = fs::metadata(&path)
+        .with_context(|| format!("failed to stat zellij bootstrap script {}", path.display()))?
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&path, permissions).with_context(|| {
+        format!(
+            "failed to make zellij bootstrap script executable at {}",
+            path.display()
+        )
+    })?;
+
+    Ok(path)
+}
+
+fn shell_escape(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn interactive_entrypoint(command: Option<&Commands>) -> bool {
@@ -931,57 +1020,63 @@ fn run_forest_tui() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bootstrap_tmux_args, should_bootstrap_into_tmux, Commands};
+    use super::{
+        bootstrap_target, bootstrap_tmux_args, bootstrap_zellij_args,
+        build_zellij_bootstrap_script, BootstrapTarget, Commands,
+    };
     use std::ffi::OsString;
     use std::path::Path;
 
     #[test]
-    fn bootstraps_default_tui_entrypoint_outside_tmux() {
-        assert!(should_bootstrap_into_tmux(None, false, true, false));
+    fn bootstraps_default_tui_entrypoint_into_zellij_when_available() {
+        assert_eq!(
+            bootstrap_target(None, false, true, true),
+            Some(BootstrapTarget::Zellij)
+        );
     }
 
     #[test]
-    fn skips_bootstrap_when_zellij_is_available() {
-        assert!(!should_bootstrap_into_tmux(None, false, true, true));
+    fn bootstraps_default_tui_entrypoint_into_tmux_as_fallback() {
+        assert_eq!(
+            bootstrap_target(None, false, true, false),
+            Some(BootstrapTarget::Tmux)
+        );
     }
 
     #[test]
     fn bootstraps_explicit_interactive_entrypoints_only() {
-        assert!(should_bootstrap_into_tmux(
-            Some(&Commands::Tui),
-            false,
-            true,
-            false
-        ));
-        assert!(should_bootstrap_into_tmux(
-            Some(&Commands::Forest),
-            false,
-            true,
-            false
-        ));
-        assert!(!should_bootstrap_into_tmux(
-            Some(&Commands::List),
-            false,
-            true,
-            false
-        ));
-        assert!(!should_bootstrap_into_tmux(
-            Some(&Commands::Create {
-                name: None,
-                base: "main".to_string(),
-                carry: false,
-                remote: None,
-            }),
-            false,
-            true,
-            false,
-        ));
+        assert_eq!(
+            bootstrap_target(Some(&Commands::Tui), false, true, false),
+            Some(BootstrapTarget::Tmux)
+        );
+        assert_eq!(
+            bootstrap_target(Some(&Commands::Forest), false, true, true),
+            Some(BootstrapTarget::Zellij)
+        );
+        assert_eq!(
+            bootstrap_target(Some(&Commands::List), false, true, true),
+            None
+        );
+        assert_eq!(
+            bootstrap_target(
+                Some(&Commands::Create {
+                    name: None,
+                    base: "main".to_string(),
+                    carry: false,
+                    remote: None,
+                }),
+                false,
+                true,
+                true,
+            ),
+            None,
+        );
     }
 
     #[test]
     fn skips_bootstrap_when_tmux_is_unavailable_or_already_active() {
-        assert!(!should_bootstrap_into_tmux(None, true, true, false));
-        assert!(!should_bootstrap_into_tmux(None, false, false, false));
+        assert_eq!(bootstrap_target(None, true, true, true), None);
+        assert_eq!(bootstrap_target(None, false, false, false), None);
     }
 
     #[test]
@@ -1004,6 +1099,42 @@ mod tests {
                 OsString::from("/nix/store/bin/.cwt-wrapped"),
                 OsString::from("tui"),
             ]
+        );
+    }
+
+    #[test]
+    fn bootstrap_zellij_args_preserve_current_working_directory() {
+        let args = bootstrap_zellij_args(
+            Path::new("/repo/root"),
+            Path::new("/tmp/cwt-zellij-bootstrap.sh"),
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("attach"),
+                OsString::from("-c"),
+                OsString::from("cwt"),
+                OsString::from("options"),
+                OsString::from("--default-cwd"),
+                OsString::from("/repo/root"),
+                OsString::from("--default-shell"),
+                OsString::from("/tmp/cwt-zellij-bootstrap.sh"),
+            ]
+        );
+    }
+
+    #[test]
+    fn zellij_bootstrap_script_execs_the_current_binary_with_args() {
+        let script = build_zellij_bootstrap_script(
+            Path::new("/nix/store/bin/.cwt-wrapped"),
+            &[OsString::from("forest"), OsString::from("--flag")],
+        )
+        .unwrap();
+
+        assert_eq!(
+            script,
+            "#!/bin/sh\nexec '/nix/store/bin/.cwt-wrapped' 'forest' '--flag'\n"
         );
     }
 }

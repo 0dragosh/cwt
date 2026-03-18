@@ -1480,7 +1480,7 @@ impl App {
         };
 
         if !crate::tmux::pane::is_inside_tmux() {
-            self.status_message = "tmux required for shell panes".to_string();
+            self.status_message = "zellij or tmux required for shell panes".to_string();
             return Ok(());
         }
 
@@ -3792,7 +3792,7 @@ impl ForestApp {
         };
 
         if !crate::tmux::pane::is_inside_tmux() {
-            self.status_message = "tmux required for shell panes".to_string();
+            self.status_message = "zellij or tmux required for shell panes".to_string();
             return Ok(());
         }
 

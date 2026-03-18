@@ -14,12 +14,14 @@ pub struct PaneInfo {
 
 /// Check if we're currently running inside a tmux session.
 pub fn is_inside_tmux() -> bool {
-    match preferred_multiplexer() {
-        Multiplexer::Zellij => is_inside_zellij(),
-        Multiplexer::Tmux => {
-            inside_tmux_with_probe(std::env::var_os("TMUX").as_deref(), probe_tmux_client)
-        }
-    }
+    active_multiplexer(
+        std::env::var_os("ZELLIJ").as_deref(),
+        std::env::var_os("ZELLIJ_SESSION_NAME").as_deref(),
+        std::env::var_os("TMUX").as_deref(),
+        is_inside_zellij,
+        probe_tmux_client,
+    )
+    .is_some()
 }
 
 /// Get the current tmux session name.
@@ -221,11 +223,42 @@ enum Multiplexer {
 }
 
 fn preferred_multiplexer() -> Multiplexer {
+    if let Some(active) = active_multiplexer(
+        std::env::var_os("ZELLIJ").as_deref(),
+        std::env::var_os("ZELLIJ_SESSION_NAME").as_deref(),
+        std::env::var_os("TMUX").as_deref(),
+        is_inside_zellij,
+        probe_tmux_client,
+    ) {
+        return active;
+    }
+
     if command_available("zellij") {
         Multiplexer::Zellij
     } else {
         Multiplexer::Tmux
     }
+}
+
+fn active_multiplexer(
+    zellij_env: Option<&std::ffi::OsStr>,
+    zellij_session_env: Option<&std::ffi::OsStr>,
+    tmux_env: Option<&std::ffi::OsStr>,
+    probe_zellij: impl FnOnce() -> bool,
+    probe_tmux: impl FnOnce() -> bool,
+) -> Option<Multiplexer> {
+    if (matches!(zellij_env, Some(value) if !value.is_empty())
+        || matches!(zellij_session_env, Some(value) if !value.is_empty()))
+        && probe_zellij()
+    {
+        return Some(Multiplexer::Zellij);
+    }
+
+    if inside_tmux_with_probe(tmux_env, probe_tmux) {
+        return Some(Multiplexer::Tmux);
+    }
+
+    None
 }
 
 fn command_available(command: &str) -> bool {
@@ -404,6 +437,26 @@ mod tests {
             Some(OsStr::new("/tmp/tmux-501/default,123,0")),
             || true,
         ));
+    }
+
+    #[test]
+    fn active_tmux_session_beats_zellij_installation() {
+        let multiplexer = active_multiplexer(
+            None,
+            None,
+            Some(OsStr::new("/tmp/tmux-501/default,123,0")),
+            || false,
+            || true,
+        );
+
+        assert_eq!(multiplexer, Some(Multiplexer::Tmux));
+    }
+
+    #[test]
+    fn active_zellij_session_is_detected_without_tmux() {
+        let multiplexer = active_multiplexer(Some(OsStr::new("0")), None, None, || true, || false);
+
+        assert_eq!(multiplexer, Some(Multiplexer::Zellij));
     }
 
     #[test]
