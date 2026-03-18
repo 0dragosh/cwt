@@ -282,17 +282,28 @@ fn launch_zellij_session(
     exe: &Path,
     args: &[OsString],
 ) -> Result<std::process::ExitStatus> {
-    if zellij_session_exists("cwt")? {
-        ProcessCommand::new("zellij")
-            .args(zellij_attach_args("cwt"))
-            .status()
-            .context("failed to attach to existing zellij session")
-    } else {
-        let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
-        ProcessCommand::new("zellij")
-            .args(zellij_new_session_args("cwt", &layout_path))
-            .status()
-            .context("failed to launch cwt in a new zellij session")
+    match zellij_session_state("cwt")? {
+        Some(ZellijSessionState::Running) => {
+            ProcessCommand::new("zellij")
+                .args(zellij_attach_args("cwt"))
+                .status()
+                .context("failed to attach to existing zellij session")
+        }
+        Some(ZellijSessionState::Exited) => {
+            delete_zellij_session("cwt")?;
+            let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
+            ProcessCommand::new("zellij")
+                .args(zellij_new_session_args("cwt", &layout_path))
+                .status()
+                .context("failed to relaunch cwt in zellij after deleting exited session")
+        }
+        None => {
+            let layout_path = write_zellij_bootstrap_layout(cwd, exe, args)?;
+            ProcessCommand::new("zellij")
+                .args(zellij_new_session_args("cwt", &layout_path))
+                .status()
+                .context("failed to launch cwt in a new zellij session")
+        }
     }
 }
 
@@ -302,16 +313,22 @@ fn zellij_attach_args(session_name: &str) -> Vec<OsString> {
 
 fn zellij_new_session_args(session_name: &str, layout_path: &Path) -> Vec<OsString> {
     vec![
+        OsString::from("--new-session-with-layout"),
+        layout_path.as_os_str().to_os_string(),
         OsString::from("--session"),
         OsString::from(session_name),
-        OsString::from("--layout"),
-        layout_path.as_os_str().to_os_string(),
     ]
 }
 
-fn zellij_session_exists(session_name: &str) -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZellijSessionState {
+    Running,
+    Exited,
+}
+
+fn zellij_session_state(session_name: &str) -> Result<Option<ZellijSessionState>> {
     let output = ProcessCommand::new("zellij")
-        .args(["list-sessions", "--short", "--no-formatting"])
+        .args(["list-sessions", "--no-formatting"])
         .output()
         .context("failed to query zellij sessions")?;
 
@@ -320,14 +337,37 @@ fn zellij_session_exists(session_name: &str) -> Result<bool> {
         anyhow::bail!("zellij list-sessions failed: {}", stderr.trim());
     }
 
-    Ok(zellij_session_exists_in_listing(
+    Ok(zellij_session_state_in_listing(
         session_name,
         &String::from_utf8_lossy(&output.stdout),
     ))
 }
 
-fn zellij_session_exists_in_listing(session_name: &str, listing: &str) -> bool {
-    listing.lines().any(|line| line.trim() == session_name)
+fn zellij_session_state_in_listing(session_name: &str, listing: &str) -> Option<ZellijSessionState> {
+    for line in listing.lines() {
+        let trimmed = line.trim();
+        if trimmed == session_name || trimmed.starts_with(&format!("{session_name} ")) {
+            if trimmed.contains("(EXITED") {
+                return Some(ZellijSessionState::Exited);
+            }
+            return Some(ZellijSessionState::Running);
+        }
+    }
+    None
+}
+
+fn delete_zellij_session(session_name: &str) -> Result<()> {
+    let output = ProcessCommand::new("zellij")
+        .args(["delete-session", "--force", session_name])
+        .output()
+        .context("failed to delete exited zellij session")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij delete-session failed: {}", stderr.trim());
+    }
+
+    Ok(())
 }
 
 fn write_zellij_bootstrap_layout(cwd: &Path, exe: &Path, args: &[OsString]) -> Result<PathBuf> {
@@ -1049,7 +1089,8 @@ fn run_forest_tui() -> Result<()> {
 mod tests {
     use super::{
         bootstrap_target, bootstrap_tmux_args, build_zellij_bootstrap_layout, zellij_attach_args,
-        zellij_new_session_args, zellij_session_exists_in_listing, BootstrapTarget, Commands,
+        zellij_new_session_args, zellij_session_state_in_listing, BootstrapTarget, Commands,
+        ZellijSessionState,
     };
     use std::ffi::OsString;
     use std::path::Path;
@@ -1143,10 +1184,10 @@ mod tests {
         assert_eq!(
             args,
             vec![
+                OsString::from("--new-session-with-layout"),
+                OsString::from("/tmp/cwt-zellij-bootstrap.kdl"),
                 OsString::from("--session"),
                 OsString::from("cwt"),
-                OsString::from("--layout"),
-                OsString::from("/tmp/cwt-zellij-bootstrap.kdl"),
             ]
         );
     }
@@ -1168,8 +1209,20 @@ mod tests {
 
     #[test]
     fn zellij_session_listing_matches_exact_session_names() {
-        let listing = "alpha\ncwt\ncwt-dev\n";
-        assert!(zellij_session_exists_in_listing("cwt", listing));
-        assert!(!zellij_session_exists_in_listing("wt", listing));
+        let listing = "alpha [Created 1m ago]\ncwt [Created 2m ago]\ncwt-dev [Created 3m ago]\n";
+        assert_eq!(
+            zellij_session_state_in_listing("cwt", listing),
+            Some(ZellijSessionState::Running)
+        );
+        assert_eq!(zellij_session_state_in_listing("wt", listing), None);
+    }
+
+    #[test]
+    fn zellij_session_listing_detects_exited_sessions() {
+        let listing = "cwt [Created 2m ago] (EXITED - attach to resurrect)\n";
+        assert_eq!(
+            zellij_session_state_in_listing("cwt", listing),
+            Some(ZellijSessionState::Exited)
+        );
     }
 }
