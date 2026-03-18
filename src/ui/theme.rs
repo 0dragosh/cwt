@@ -23,6 +23,13 @@ pub fn selected_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+pub fn focused_selected_style() -> Style {
+    Style::default()
+        .bg(Color::Cyan)
+        .fg(Color::Black)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn status_running_style() -> Style {
     Style::default().fg(Color::Green)
 }

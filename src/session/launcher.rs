@@ -263,7 +263,10 @@ mod tests {
             &PermissionsConfig::default(),
         );
 
-        assert!(cmd.starts_with("codex"), "expected codex command, got: {cmd}");
+        assert!(
+            cmd.starts_with("codex"),
+            "expected codex command, got: {cmd}"
+        );
     }
 
     // --- json_deep_merge ---
