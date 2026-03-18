@@ -47,6 +47,16 @@ Optional:
 
 ## Installation
 
+### Prebuilt binaries with cargo-binstall
+
+```sh
+cargo binstall cwt
+```
+
+`cargo-binstall` downloads the prebuilt release archive when one is available
+for your target. `tmux` is still a separate runtime dependency and must be on
+your `PATH`.
+
 ### Cargo (from crates.io)
 
 ```sh
