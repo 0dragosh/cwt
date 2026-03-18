@@ -4188,12 +4188,12 @@ impl ForestApp {
 mod selection_tests {
     use super::{
         arm_post_create_delete_guard, clamp_selected_index, drain_pending_terminal_events_with,
-        refresh_post_create_delete_guard_on_focus_return, ActiveDialog, App,
-        should_ignore_delete_shortcut, should_process_key_event,
+        refresh_post_create_delete_guard_on_focus_return, should_ignore_delete_shortcut,
+        should_process_key_event, ActiveDialog, App,
     };
     use crate::config::{Config, ConfigMeta};
-    use crate::worktree::Manager;
     use crate::worktree::model::{Lifecycle, Worktree};
+    use crate::worktree::Manager;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use std::cell::RefCell;
     use std::collections::VecDeque;
@@ -4244,11 +4244,7 @@ mod selection_tests {
         let (tmp, root) = make_test_repo();
         let mut cfg = Config::default();
         cfg.session.auto_launch = auto_launch;
-        cfg.worktree.dir = tmp
-            .path()
-            .join("worktrees")
-            .to_string_lossy()
-            .into_owned();
+        cfg.worktree.dir = tmp.path().join("worktrees").to_string_lossy().into_owned();
         let manager = Manager::new(root, cfg);
         let app = App::new(manager, ConfigMeta::default()).expect("create app");
         (tmp, app)
