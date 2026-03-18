@@ -443,6 +443,12 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     // Startup checks
     startup_checks()?;
 
+    if crate::tmux::pane::is_inside_tmux() {
+        if let Err(err) = crate::tmux::pane::ensure_worktrees_explorer_tab() {
+            eprintln!("warning: failed to name worktree explorer tab: {err}");
+        }
+    }
+
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -1051,6 +1057,12 @@ fn run_forest_tui() -> Result<()> {
 
     // Startup checks
     startup_checks()?;
+
+    if crate::tmux::pane::is_inside_tmux() {
+        if let Err(err) = crate::tmux::pane::ensure_worktrees_explorer_tab() {
+            eprintln!("warning: failed to name worktree explorer tab: {err}");
+        }
+    }
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
