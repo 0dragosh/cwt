@@ -192,11 +192,22 @@ fn main() -> Result<()> {
 
 fn maybe_bootstrap_into_tmux(cli: &Cli) -> Result<()> {
     let inside_tmux = crate::tmux::pane::is_inside_tmux();
+    let zellij_available = which::which("zellij").is_ok();
     let tmux_available = which::which("tmux").is_ok();
 
-    if !should_bootstrap_into_tmux(cli.command.as_ref(), inside_tmux, tmux_available) {
-        if interactive_entrypoint(cli.command.as_ref()) && !inside_tmux && !tmux_available {
-            eprintln!("error: cwt interactive mode requires tmux");
+    if !should_bootstrap_into_tmux(
+        cli.command.as_ref(),
+        inside_tmux,
+        tmux_available,
+        zellij_available,
+    ) {
+        if interactive_entrypoint(cli.command.as_ref())
+            && !inside_tmux
+            && !tmux_available
+            && !zellij_available
+        {
+            eprintln!("error: cwt interactive mode requires zellij or tmux");
+            eprintln!("  Install zellij: https://zellij.dev/documentation/installation");
             eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
             std::process::exit(1);
         }
@@ -238,8 +249,9 @@ fn should_bootstrap_into_tmux(
     command: Option<&Commands>,
     inside_tmux: bool,
     tmux_available: bool,
+    zellij_available: bool,
 ) -> bool {
-    !inside_tmux && tmux_available && interactive_entrypoint(command)
+    !inside_tmux && !zellij_available && tmux_available && interactive_entrypoint(command)
 }
 
 fn interactive_entrypoint(command: Option<&Commands>) -> bool {
@@ -339,10 +351,11 @@ fn startup_checks() -> Result<()> {
         std::process::exit(1);
     }
 
-    // Check that tmux is available (warn but don't block)
-    if which::which("tmux").is_err() {
-        eprintln!("warning: tmux not found on PATH");
-        eprintln!("  Session launching requires tmux.");
+    // Check multiplexer availability (warn but don't block)
+    if which::which("zellij").is_err() && which::which("tmux").is_err() {
+        eprintln!("warning: neither zellij nor tmux found on PATH");
+        eprintln!("  Session launching requires a terminal multiplexer.");
+        eprintln!("  Install zellij: https://zellij.dev/documentation/installation");
         eprintln!("  Install tmux: https://github.com/tmux/tmux/wiki/Installing");
         eprintln!();
     }
@@ -605,10 +618,10 @@ fn cmd_dispatch(manager: &Manager, tasks: &[String], base: &str) -> Result<()> {
         std::process::exit(1);
     }
 
-    // Check tmux
+    // Check multiplexer
     if !crate::tmux::pane::is_inside_tmux() {
-        eprintln!("error: cwt dispatch requires tmux");
-        eprintln!("  Run cwt inside a tmux session to dispatch tasks.");
+        eprintln!("error: cwt dispatch requires an active multiplexer session");
+        eprintln!("  Run cwt inside zellij (preferred) or tmux to dispatch tasks.");
         std::process::exit(1);
     }
 
@@ -659,10 +672,10 @@ fn cmd_import(
         std::process::exit(1);
     }
 
-    // Check tmux
+    // Check multiplexer
     if !crate::tmux::pane::is_inside_tmux() {
-        eprintln!("error: cwt import requires tmux");
-        eprintln!("  Run cwt inside a tmux session to import issues.");
+        eprintln!("error: cwt import requires an active multiplexer session");
+        eprintln!("  Run cwt inside zellij (preferred) or tmux to import issues.");
         std::process::exit(1);
     }
 
@@ -891,7 +904,12 @@ mod tests {
 
     #[test]
     fn bootstraps_default_tui_entrypoint_outside_tmux() {
-        assert!(should_bootstrap_into_tmux(None, false, true));
+        assert!(should_bootstrap_into_tmux(None, false, true, false));
+    }
+
+    #[test]
+    fn skips_bootstrap_when_zellij_is_available() {
+        assert!(!should_bootstrap_into_tmux(None, false, true, true));
     }
 
     #[test]
@@ -899,17 +917,20 @@ mod tests {
         assert!(should_bootstrap_into_tmux(
             Some(&Commands::Tui),
             false,
-            true
+            true,
+            false
         ));
         assert!(should_bootstrap_into_tmux(
             Some(&Commands::Forest),
             false,
-            true
+            true,
+            false
         ));
         assert!(!should_bootstrap_into_tmux(
             Some(&Commands::List),
             false,
-            true
+            true,
+            false
         ));
         assert!(!should_bootstrap_into_tmux(
             Some(&Commands::Create {
@@ -920,13 +941,14 @@ mod tests {
             }),
             false,
             true,
+            false,
         ));
     }
 
     #[test]
     fn skips_bootstrap_when_tmux_is_unavailable_or_already_active() {
-        assert!(!should_bootstrap_into_tmux(None, true, true));
-        assert!(!should_bootstrap_into_tmux(None, false, false));
+        assert!(!should_bootstrap_into_tmux(None, true, true, false));
+        assert!(!should_bootstrap_into_tmux(None, false, false, false));
     }
 
     #[test]
