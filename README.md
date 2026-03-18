@@ -352,9 +352,25 @@ The elevated (sandboxed) provider mode writes these settings before launch:
 | `cwt dispatch "task" ...`           | Dispatch parallel tasks            |
 | `cwt import --github [--limit N]`   | Import GitHub issues as worktrees  |
 | `cwt import --linear [--limit N]`   | Import Linear issues as worktrees  |
+| `cwt prompt`                        | Print active cwt worktree name     |
 | `cwt add-repo <path>`               | Register a repo for forest mode    |
 | `cwt forest`                        | Launch forest (multi-repo) TUI     |
 | `cwt status`                        | Summary of all repos and sessions  |
+
+### Starship prompt integration
+
+`cwt prompt` prints the current managed worktree name when your shell is inside
+that worktree directory, and prints nothing otherwise. This makes it easy to
+surface worktree context in [starship](https://starship.rs/) (similar to
+worktrunk):
+
+```toml
+[custom.cwt]
+command = "cwt prompt"
+when = "cwt prompt | grep -q ."
+format = "[$output]($style) "
+style = "bold purple"
+```
 
 ## Configuration
 
