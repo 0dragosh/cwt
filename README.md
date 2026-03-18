@@ -2,8 +2,9 @@
 
 A terminal UI for running parallel
 provider (Claude or Codex) sessions in
-isolated git worktrees. Built in Rust, uses tmux for all interactive session
-management, and requires tmux to be installed.
+isolated git worktrees. Built in Rust, it uses a local terminal multiplexer for
+interactive session management, preferring zellij when available and falling
+back to tmux.
 
 > **The worktree is the first-class primitive** — sessions attach to worktrees,
 > not the other way around.
@@ -36,7 +37,8 @@ all from a single TUI.
 ## Requirements
 
 - **git** (with worktree support)
-- **tmux** (mandatory; interactive mode and session management depend on it)
+- **zellij** or **tmux** (interactive mode needs one local terminal multiplexer;
+  zellij is preferred when both are installed)
 - A provider CLI (`claude` or `codex`)
 
 Optional:
@@ -54,8 +56,8 @@ cargo binstall cwt
 ```
 
 `cargo-binstall` downloads the prebuilt release archive when one is available
-for your target. `tmux` is still a separate runtime dependency and must be on
-your `PATH`.
+for your target. Install either `zellij` or `tmux` separately and make sure it
+is on your `PATH`.
 
 ### Cargo (from crates.io)
 
@@ -63,14 +65,16 @@ your `PATH`.
 cargo install cwt
 ```
 
-`cargo install` does not install tmux for you. Install `tmux` separately and
-make sure it is on your `PATH` before running `cwt`.
+`cargo install` does not install a terminal multiplexer for you. Install
+`zellij` or `tmux` separately and make sure it is on your `PATH` before running
+`cwt`.
 
 ### Nix (recommended)
 
 cwt provides a Nix flake with builds for Linux and macOS (x86_64 and aarch64).
 The Nix package includes `tmux` and `git` as runtime dependencies and wraps the
-binary so they are always on `PATH`.
+binary so they are always on `PATH`. If `zellij` is also available in your
+environment, `cwt` will prefer it automatically for local interactive sessions.
 
 ```sh
 # Run without installing
@@ -114,20 +118,21 @@ cargo build --release
 # Binary at target/release/cwt — add it to your PATH
 ```
 
-Make sure `git` is on your `PATH`, and make sure `tmux` is installed and on your
-`PATH`. `cwt` cannot run its interactive workflows without tmux.
+Make sure `git` is on your `PATH`, and make sure `zellij` or `tmux` is
+installed and on your `PATH`. `cwt` cannot run its interactive workflows
+without one of them.
 
 ## Quick Start
 
-`tmux` is a hard dependency. If you launch `cwt` from a regular interactive
-shell, it will bootstrap into tmux automatically when possible, but tmux still
-must be installed locally.
+Interactive mode needs a local terminal multiplexer. If you launch `cwt` from a
+regular shell, it will bootstrap into a `zellij` session when `zellij` is
+installed, and otherwise fall back to `tmux`.
 
 ```sh
 # 1. Navigate to any git repo
 cd ~/my-project
 
-# 2. Launch the TUI (cwt will bootstrap into tmux if needed)
+# 2. Launch the TUI (cwt will bootstrap into zellij or tmux if needed)
 cwt
 
 # 3. Press 'n' to create a worktree (Enter for auto-generated name)
@@ -180,7 +185,7 @@ cwt status                             # CLI summary across repos
 - **Mouse support**: click to select, scroll to navigate
 - **Status bar**: notification badges for waiting/done sessions
 
-### tmux Session Management
+### Terminal Multiplexer Support
 
 ### Session Providers
 
@@ -188,12 +193,18 @@ cwt status                             # CLI summary across repos
 - You can set the default in config with `session.provider = "claude"` or `"codex"`
 - You can change the active provider at runtime by pressing `o` in the TUI
 - Press `O` to persist the currently selected provider as the default
-
-- **Launch** the provider (Claude or Codex) in a tmux pane attached to any worktree
+- Local interactive mode prefers **zellij** and falls back to **tmux**
+- Launching `cwt` outside a multiplexer auto-attaches to a `cwt` session in the
+  preferred backend
+- In zellij, provider sessions and shells open in named tabs; in tmux, they
+  open in panes/windows
+- **Launch** the provider (Claude or Codex) in the active multiplexer attached
+  to any worktree
 - **Resume** previous sessions using the active provider's resume flow (`--resume` for Claude)
-- **Focus** an existing session pane with a single keypress
-- **Open shell** in any worktree directory via a tmux pane
+- **Focus** an existing session tab/pane with a single keypress
+- **Open shell** in any worktree directory via the active multiplexer
 - Sessions survive TUI exit — closing cwt does not kill running sessions
+- Remote sessions still use **tmux** on the remote host today
 
 ### Handoff
 
@@ -287,13 +298,14 @@ The elevated (sandboxed) provider mode writes these settings before launch:
 | Key     | Action                               | Context            |
 | ------- | ------------------------------------ | ------------------ |
 | `n`     | New worktree                         | Global             |
-| `s`     | Launch/resume provider session         | Worktree selected  |
+| `s`     | Launch/resume provider session       | Worktree selected  |
 | `h`     | Handoff changes (worktree <-> local) | Worktree selected  |
 | `p`     | Promote to permanent                 | Ephemeral selected |
 | `d`     | Delete (with snapshot)               | Worktree selected  |
 | `g`     | Run garbage collection               | Global             |
 | `r`     | Restore from snapshot                | Global             |
-| `Enter` | Open shell in worktree (tmux pane)   | Worktree selected  |
+| `Enter` | Launch/resume provider session       | Worktree selected  |
+| `e`     | Open shell in worktree               | Worktree selected  |
 
 ### Orchestration
 
@@ -440,7 +452,7 @@ src/
   git/             # Git worktree, branch, and diff operations
   worktree/        # Worktree CRUD, handoff, snapshots, setup, slug generation
   session/         # provider session launcher, tracker, transcript parser
-  tmux/            # tmux pane create/focus/kill/send-keys
+  tmux/            # local multiplexer abstraction (zellij + tmux)
   hooks/           # Unix socket listener, hook events, script installer
   forest/          # Multi-repo config, global index
   orchestration/   # Task dispatch, issue import, broadcast, dashboard
@@ -452,9 +464,9 @@ src/
 
 ## Troubleshooting
 
-**cwt says "tmux is required"** `tmux` is a mandatory runtime dependency.
-Install it first, then run `cwt` again. If you launch `cwt` from a normal
-interactive shell, it will bootstrap into tmux automatically when possible.
+**cwt says "zellij or tmux is required"** Install either `zellij` or `tmux`
+first, then run `cwt` again. When both are installed locally, `cwt` prefers
+`zellij`; otherwise it falls back to `tmux`.
 
 **Worktrees don't appear after a provider creates them** Run
 `cwt hooks install` to set up the real-time hook integration. Without hooks, cwt
