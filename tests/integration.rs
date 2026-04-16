@@ -237,6 +237,12 @@ fn test_release_prs_dispatch_ci_checks() {
         release_workflow.contains("env.RELEASE_PLZ_TOKEN == ''"),
         "manual CI dispatch should only run when no dedicated release token is configured"
     );
+    assert!(
+        release_workflow.contains(
+            "GH_TOKEN: ${{ env.RELEASE_PLZ_TOKEN != '' && env.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}"
+        ),
+        "auto-merge should prefer RELEASE_PLZ_TOKEN so the merge can still trigger follow-up workflows"
+    );
 }
 
 // ===========================================================================

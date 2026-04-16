@@ -43,7 +43,7 @@ jobs:
       - name: Enable auto-merge on release PR
         if: steps.release-plz.outputs.prs_created == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.RELEASE_PLZ_TOKEN != '' && env.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           for pr in $(echo '${{ steps.release-plz.outputs.prs }}' | jq -r '.[].number'); do
             gh pr merge "$pr" --auto --squash
