@@ -223,6 +223,20 @@ fn test_release_prs_dispatch_ci_checks() {
         release_workflow.contains("gh workflow run .github/workflows/ci.yml --ref \"$branch\""),
         "release workflow should dispatch CI for each release PR branch"
     );
+    assert!(
+        release_workflow.contains("RELEASE_PLZ_TOKEN"),
+        "release workflow should support a dedicated token for PR-triggered CI"
+    );
+    assert!(
+        release_workflow.contains(
+            "env.RELEASE_PLZ_TOKEN != '' && env.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN"
+        ),
+        "release workflow should prefer RELEASE_PLZ_TOKEN when available"
+    );
+    assert!(
+        release_workflow.contains("env.RELEASE_PLZ_TOKEN == ''"),
+        "manual CI dispatch should only run when no dedicated release token is configured"
+    );
 }
 
 // ===========================================================================
