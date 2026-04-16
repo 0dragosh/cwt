@@ -200,6 +200,31 @@ fn test_release_linux_binaries_target_ubuntu_22_04() {
     }
 }
 
+#[test]
+fn test_release_prs_dispatch_ci_checks() {
+    let ci_workflow = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"),
+    )
+    .expect("read ci workflow");
+    assert!(
+        ci_workflow.contains("workflow_dispatch:"),
+        "CI workflow should allow manual dispatch for release PR branches"
+    );
+
+    let release_workflow = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/release-plz.yml"),
+    )
+    .expect("read release workflow");
+    assert!(
+        release_workflow.contains("actions: write"),
+        "release workflow should request actions: write so it can dispatch CI"
+    );
+    assert!(
+        release_workflow.contains("gh workflow run .github/workflows/ci.yml --ref \"$branch\""),
+        "release workflow should dispatch CI for each release PR branch"
+    );
+}
+
 // ===========================================================================
 // Worktree CRUD
 // ===========================================================================

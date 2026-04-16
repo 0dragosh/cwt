@@ -15,6 +15,7 @@ jobs:
       releases: ${{ steps.release-plz.outputs.releases }}
       releases_created: ${{ steps.release-plz.outputs.releases_created }}
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -42,6 +43,16 @@ jobs:
         run: |
           for pr in $(echo '${{ steps.release-plz.outputs.prs }}' | jq -r '.[].number'); do
             gh pr merge "$pr" --auto --squash
+          done
+
+      - name: Trigger CI for release PRs
+        if: steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for pr in $(echo '${{ steps.release-plz.outputs.prs }}' | jq -r '.[].number'); do
+            branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
+            gh workflow run .github/workflows/ci.yml --ref "$branch"
           done
 
   upload-release-assets:
