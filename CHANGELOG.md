@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11](https://github.com/0dragosh/cwt/compare/v0.2.10...v0.2.11) - 2026-04-16
+
+### Other
+
+- *(deps)* bump rand from 0.10.0 to 0.10.1 ([#44](https://github.com/0dragosh/cwt/pull/44))
+
 ## [0.2.10](https://github.com/0dragosh/cwt/compare/v0.2.9...v0.2.10) - 2026-04-16
 
 ### Fixed
