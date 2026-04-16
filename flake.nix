@@ -24,11 +24,22 @@
           };
           rustToolchain = pkgs.rust-bin.stable.latest.default;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let
+                relPath = pkgs.lib.removePrefix "${toString ./.}/" (toString path);
+              in
+              craneLib.filterCargoSources path type
+              || relPath == ".github"
+              || relPath == ".github/workflows"
+              || pkgs.lib.hasPrefix ".github/workflows/" relPath;
+          };
 
           cwt = craneLib.buildPackage {
             pname = "cwt";
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
-            src = craneLib.cleanCargoSource ./.;
+            inherit src;
 
             nativeBuildInputs = with pkgs; [ pkg-config makeWrapper git ];
             buildInputs = with pkgs; [ ]
