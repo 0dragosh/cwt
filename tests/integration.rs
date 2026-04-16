@@ -179,6 +179,27 @@ fn read_state(repo_root: &Path) -> serde_json::Value {
     serde_json::from_str(&content).expect("failed to parse state.json")
 }
 
+#[test]
+fn test_release_linux_binaries_target_ubuntu_22_04() {
+    let workflow = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/release-plz.yml"),
+    )
+    .expect("read release workflow");
+
+    for target in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"] {
+        let expected = format!("          - os: ubuntu-22.04\n            target: {target}");
+        let old = format!("          - os: ubuntu-latest\n            target: {target}");
+        assert!(
+            workflow.contains(&expected),
+            "release workflow should build {target} on ubuntu-22.04 for glibc compatibility"
+        );
+        assert!(
+            !workflow.contains(&old),
+            "release workflow should not build {target} on ubuntu-latest"
+        );
+    }
+}
+
 // ===========================================================================
 // Worktree CRUD
 // ===========================================================================
