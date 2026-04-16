@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10](https://github.com/0dragosh/cwt/compare/v0.2.9...v0.2.10) - 2026-04-16
+
+### Fixed
+
+- use dedicated token for release PR CI
+- dispatch CI for release PRs
+- build linux release assets on ubuntu 22.04 ([#46](https://github.com/0dragosh/cwt/pull/46))
+
 ## [0.2.9](https://github.com/0dragosh/cwt/compare/v0.2.8...v0.2.9) - 2026-03-18
 
 ### Other
