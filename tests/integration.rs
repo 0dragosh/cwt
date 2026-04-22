@@ -179,6 +179,13 @@ fn read_state(repo_root: &Path) -> serde_json::Value {
     serde_json::from_str(&content).expect("failed to parse state.json")
 }
 
+fn canonical_path_string(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
+
 #[test]
 fn test_release_linux_binaries_target_ubuntu_22_04() {
     let workflow = std::fs::read_to_string(
@@ -679,10 +686,7 @@ fn test_hooks_install_patches_settings_json() {
 
     // Verify exact managed hook entry exists
     let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
-    let expected = root
-        .join(".cwt/hooks/cwt-stop.sh")
-        .to_string_lossy()
-        .to_string();
+    let expected = canonical_path_string(&root.join(".cwt/hooks/cwt-stop.sh"));
     assert!(
         stop_hooks
             .iter()
@@ -721,9 +725,8 @@ fn test_hooks_uninstall_cleans_settings_json() {
     // managed cwt entries should be removed from hook arrays
     if let Some(stop_hooks) = settings["hooks"]["Stop"].as_array() {
         let expected = root
-            .join(".cwt/hooks/cwt-stop.sh")
-            .to_string_lossy()
-            .to_string();
+            .join(".cwt/hooks/cwt-stop.sh");
+        let expected = canonical_path_string(&expected);
         assert!(
             !stop_hooks
                 .iter()
@@ -745,10 +748,7 @@ fn test_hooks_install_idempotent() {
 
     // Should not duplicate entries
     let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
-    let expected = root
-        .join(".cwt/hooks/cwt-stop.sh")
-        .to_string_lossy()
-        .to_string();
+    let expected = canonical_path_string(&root.join(".cwt/hooks/cwt-stop.sh"));
     let cwt_count = stop_hooks
         .iter()
         .filter(|h| h["command"].as_str().unwrap_or("") == expected)
@@ -781,10 +781,7 @@ fn test_hooks_install_adds_managed_hook_even_with_other_cwt_like_command() {
     let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
 
     let stop_hooks = settings["hooks"]["Stop"].as_array().unwrap();
-    let managed = root
-        .join(".cwt/hooks/cwt-stop.sh")
-        .to_string_lossy()
-        .to_string();
+    let managed = canonical_path_string(&root.join(".cwt/hooks/cwt-stop.sh"));
 
     assert!(
         stop_hooks
@@ -837,10 +834,7 @@ fn test_hooks_uninstall_preserves_unrelated_cwt_like_hooks() {
         "unrelated cwt-like hook should be preserved"
     );
 
-    let managed = root
-        .join(".cwt/hooks/cwt-stop.sh")
-        .to_string_lossy()
-        .to_string();
+    let managed = canonical_path_string(&root.join(".cwt/hooks/cwt-stop.sh"));
     assert!(
         !stop_hooks
             .iter()
@@ -863,6 +857,8 @@ fn test_hooks_status() {
     let (stdout, _stderr, ok) = run_cwt(&root, &["hooks", "status"]);
     assert!(ok);
     assert!(stdout.contains("script(s)"));
+    assert!(stdout.contains("Claude hooks"));
+    assert!(stdout.contains("Pi/Codex hooks are not managed in this phase"));
 }
 
 // ===========================================================================
@@ -903,6 +899,38 @@ max_ephemeral = 3
 
     // Worktree should be under .worktrees
     assert!(root.join(".worktrees/custom-cfg").exists());
+}
+
+#[test]
+fn test_project_config_accepts_pi_provider() {
+    let (_tmp, root) = make_test_repo();
+
+    let config_dir = root.join(".cwt");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        r#"
+[session]
+provider = "pi"
+"#,
+    )
+    .unwrap();
+
+    let (_stdout, stderr, ok) = run_cwt(&root, &["list"]);
+    assert!(ok, "config with pi provider should load: {stderr}");
+}
+
+#[test]
+fn test_cli_help_mentions_pi_provider_support() {
+    let output = Command::new(cwt_binary())
+        .arg("--help")
+        .output()
+        .expect("run cwt --help");
+
+    assert!(output.status.success(), "cwt --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Claude, Codex, or Pi"));
 }
 
 // ===========================================================================

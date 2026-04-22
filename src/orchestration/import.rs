@@ -200,8 +200,8 @@ pub fn fetch_linear_issues(limit: usize) -> Result<Vec<Issue>> {
     Ok(issues)
 }
 
-/// Import issues: create a worktree per issue and launch Claude with a prompt
-/// that includes the issue context and a "Fixes #N" instruction.
+/// Import issues: create a worktree per issue and launch the active provider
+/// with a prompt that includes the issue context and a "Fixes #N" instruction.
 pub fn import_issues(
     manager: &Manager,
     issues: &[Issue],

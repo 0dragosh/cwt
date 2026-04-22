@@ -96,21 +96,21 @@ fn refresh_post_create_delete_guard_on_focus_return(
     }
 }
 
-fn capture_last_session_id(manager: &Manager, wt: &mut Worktree) {
+fn capture_last_session_id(manager: &Manager, wt: &mut Worktree, provider: SessionProvider) {
     if wt.last_session_id.is_some() {
         return;
     }
 
     let wt_abs = manager.worktree_abs_path(wt);
-    if let Ok(Some(dir)) = session::tracker::find_project_dir(&wt_abs) {
-        if let Ok(Some(sid)) = session::tracker::find_latest_session_id(&dir) {
+    if let Ok(Some(dir)) = session::tracker::find_project_dir(provider, &wt_abs) {
+        if let Ok(Some(sid)) = session::tracker::find_latest_session_id(provider, &dir) {
             wt.last_session_id = Some(sid);
         }
     }
 }
 
-fn mark_session_done(manager: &Manager, wt: &mut Worktree) {
-    capture_last_session_id(manager, wt);
+fn mark_session_done(manager: &Manager, wt: &mut Worktree, provider: SessionProvider) {
+    capture_last_session_id(manager, wt, provider);
     wt.status = WorktreeStatus::Done;
     wt.tmux_pane = None;
 }
@@ -236,6 +236,7 @@ impl App {
 
     /// Refresh worktree list and update session statuses.
     pub fn refresh(&mut self) {
+        let active_provider = self.active_provider();
         if let Ok(worktrees) = self.manager.list() {
             let mut updated = worktrees;
             for wt in &mut updated {
@@ -255,7 +256,7 @@ impl App {
                 // If session just finished (was Running, now Done), clear the pane
                 // but preserve last_session_id for potential resume
                 if wt.status == WorktreeStatus::Running && new_status == WorktreeStatus::Done {
-                    mark_session_done(&self.manager, wt);
+                    mark_session_done(&self.manager, wt, active_provider);
                     continue;
                 }
 
@@ -323,9 +324,11 @@ impl App {
     /// Update aggregate dashboard stats across all sessions.
     pub fn update_dashboard(&mut self) {
         let manager = &self.manager;
-        self.dashboard = orchestration::dashboard::compute_aggregate_stats(&self.worktrees, |wt| {
-            manager.worktree_abs_path(wt)
-        });
+        self.dashboard = orchestration::dashboard::compute_aggregate_stats_for_provider(
+            &self.worktrees,
+            self.active_provider(),
+            |wt| manager.worktree_abs_path(wt),
+        );
     }
 
     /// Handle a hook event received from the Unix socket.
@@ -447,16 +450,25 @@ impl App {
                     .map(|s| s.raw)
                     .unwrap_or_default();
 
-                let project_dir = session::tracker::find_project_dir(&wt_abs).ok().flatten();
+                let provider = self.active_provider();
+                let project_dir = session::tracker::find_project_dir(provider, &wt_abs)
+                    .ok()
+                    .flatten();
 
                 let transcript_info = project_dir
                     .as_ref()
-                    .and_then(|dir| session::transcript::read_transcript_info(dir, 1).ok())
+                    .and_then(|dir| {
+                        session::transcript::read_transcript_info(provider, dir, 1).ok()
+                    })
                     .unwrap_or_default();
 
                 let session_id = project_dir
                     .as_ref()
-                    .and_then(|dir| session::tracker::find_latest_session_id(dir).ok().flatten());
+                    .and_then(|dir| {
+                        session::tracker::find_latest_session_id(provider, dir)
+                            .ok()
+                            .flatten()
+                    });
 
                 ui::inspector::InspectorInfo {
                     diff_stat_text,
@@ -1269,14 +1281,15 @@ impl App {
         }
 
         let wt_abs = self.manager.worktree_abs_path(&wt);
+        let provider = self.active_provider();
 
         // Check if we have a previous session ID to resume
         let session_id = wt.last_session_id.clone().or_else(|| {
-            session::tracker::find_project_dir(&wt_abs)
+            session::tracker::find_project_dir(provider, &wt_abs)
                 .ok()
                 .flatten()
                 .and_then(|dir| {
-                    session::tracker::find_latest_session_id(&dir)
+                    session::tracker::find_latest_session_id(provider, &dir)
                         .ok()
                         .flatten()
                 })
@@ -1729,7 +1742,7 @@ impl App {
             }
         }
 
-        let body = ship::pr::generate_pr_body(wt_abs, wt);
+        let body = ship::pr::generate_pr_body(self.active_provider(), wt_abs, wt);
         let title = ship::pr::generate_pr_title(wt);
 
         match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
@@ -1757,7 +1770,7 @@ impl App {
 
     /// Execute the "ship it" flow: push + PR + mark shipping.
     fn do_ship(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
-        match ship::pipeline::ship(wt, wt_abs) {
+        match ship::pipeline::ship(self.active_provider(), wt, wt_abs) {
             Ok(result) => {
                 // Update worktree state with PR info and shipping status
                 if let Ok(mut state) = self.manager.load_state() {
@@ -2134,7 +2147,12 @@ impl App {
             .config
             .remote
             .iter()
-            .map(remote::host::RemoteHostStatus::check)
+            .map(|host| {
+                let command = self
+                    .active_provider()
+                    .resolve_command(&self.manager.config.session.command);
+                remote::host::RemoteHostStatus::check(host, &command)
+            })
             .collect();
 
         // Update status of remote worktrees
@@ -2634,6 +2652,7 @@ impl ForestApp {
 
     /// Refresh worktree lists and stats for all repos.
     pub fn refresh(&mut self) {
+        let active_provider = self.active_provider();
         for repo in &mut self.repos {
             if let Ok(mut worktrees) = repo.manager.list() {
                 for wt in &mut worktrees {
@@ -2645,7 +2664,7 @@ impl ForestApp {
                     let new_status = session::tracker::check_status(wt.tmux_pane.as_deref());
 
                     if wt.status == WorktreeStatus::Running && new_status == WorktreeStatus::Done {
-                        mark_session_done(&repo.manager, wt);
+                        mark_session_done(&repo.manager, wt, active_provider);
                         continue;
                     }
 
@@ -2683,16 +2702,23 @@ impl ForestApp {
                 .map(|s| s.raw)
                 .unwrap_or_default();
 
-            let project_dir = session::tracker::find_project_dir(&wt_abs).ok().flatten();
+            let provider = self.active_provider();
+            let project_dir = session::tracker::find_project_dir(provider, &wt_abs)
+                .ok()
+                .flatten();
 
             let transcript_info = project_dir
                 .as_ref()
-                .and_then(|dir| session::transcript::read_transcript_info(dir, 1).ok())
+                .and_then(|dir| session::transcript::read_transcript_info(provider, dir, 1).ok())
                 .unwrap_or_default();
 
             let session_id = project_dir
                 .as_ref()
-                .and_then(|dir| session::tracker::find_latest_session_id(dir).ok().flatten());
+                .and_then(|dir| {
+                    session::tracker::find_latest_session_id(provider, dir)
+                        .ok()
+                        .flatten()
+                });
 
             ui::inspector::InspectorInfo {
                 diff_stat_text,
@@ -3648,13 +3674,14 @@ impl ForestApp {
             return Ok(());
         };
         let wt_abs = repo.manager.worktree_abs_path(&wt);
+        let provider = self.active_provider();
 
         let session_id = wt.last_session_id.clone().or_else(|| {
-            session::tracker::find_project_dir(&wt_abs)
+            session::tracker::find_project_dir(provider, &wt_abs)
                 .ok()
                 .flatten()
                 .and_then(|dir| {
-                    session::tracker::find_latest_session_id(&dir)
+                    session::tracker::find_latest_session_id(provider, &dir)
                         .ok()
                         .flatten()
                 })
@@ -4034,7 +4061,7 @@ impl ForestApp {
             }
         }
 
-        let body = ship::pr::generate_pr_body(wt_abs, wt);
+        let body = ship::pr::generate_pr_body(self.active_provider(), wt_abs, wt);
         let title = ship::pr::generate_pr_title(wt);
 
         match ship::pr::create_pr(wt_abs, &wt.branch, &wt.base_branch, &title, &body) {
@@ -4063,7 +4090,7 @@ impl ForestApp {
 
     /// Execute the "ship it" flow.
     fn do_ship(&mut self, wt: &Worktree, wt_abs: &std::path::Path) {
-        match ship::pipeline::ship(wt, wt_abs) {
+        match ship::pipeline::ship(self.active_provider(), wt, wt_abs) {
             Ok(result) => {
                 if let Some(repo) = self.selected_repo() {
                     if let Ok(mut state) = repo.manager.load_state() {
@@ -4210,8 +4237,10 @@ mod selection_tests {
         refresh_post_create_delete_guard_on_focus_return, should_ignore_delete_shortcut,
         should_process_key_event, ActiveDialog, App,
     };
+    use crate::config::project_config_path;
     use crate::config::{Config, ConfigMeta};
     use crate::hooks::event::HookEvent;
+    use crate::session::provider::SessionProvider;
     use crate::worktree::model::{Lifecycle, Worktree, WorktreeStatus};
     use crate::worktree::Manager;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -4253,6 +4282,8 @@ mod selection_tests {
         run_git(&root, &["init"]);
         run_git(&root, &["config", "user.email", "test@cwt.dev"]);
         run_git(&root, &["config", "user.name", "cwt-test"]);
+        run_git(&root, &["config", "commit.gpgsign", "false"]);
+        run_git(&root, &["config", "tag.gpgsign", "false"]);
         std::fs::write(root.join("README.md"), "# test repo\n").expect("write README");
         run_git(&root, &["add", "."]);
         run_git(&root, &["commit", "-m", "initial commit"]);
@@ -4454,5 +4485,20 @@ mod selection_tests {
             .expect("handle delete key");
 
         assert!(matches!(app.dialog, ActiveDialog::Delete(_)));
+    }
+
+    #[test]
+    fn saving_pi_provider_writes_project_config() {
+        let (_tmp, mut app) = make_test_app(false);
+        app.provider_override = Some(SessionProvider::Pi);
+
+        app.handle_key(press(KeyCode::Char('O')))
+            .expect("save provider shortcut should succeed");
+
+        let config_path = project_config_path(&app.manager.repo_root);
+        let content = std::fs::read_to_string(&config_path).expect("project config should exist");
+
+        assert!(content.contains("provider = \"pi\""));
+        assert!(app.status_message.contains("Saved default provider 'Pi'"));
     }
 }

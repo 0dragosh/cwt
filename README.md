@@ -1,7 +1,7 @@
-# cwt — Provider (Claude or Codex) Worktree Manager
+# cwt — Provider (Claude, Codex, or Pi) Worktree Manager
 
 A terminal UI for running parallel
-provider (Claude or Codex) sessions in
+provider (Claude, Codex, or Pi) sessions in
 isolated git worktrees. Built in Rust, it uses a local terminal multiplexer for
 interactive session management, preferring zellij when available and falling
 back to tmux.
@@ -19,7 +19,7 @@ Worktree (unit of work)
 
 ## Why cwt?
 
-When using a provider (Claude or Codex) on a real codebase, you often want to run multiple tasks
+When using a provider (Claude, Codex, or Pi) on a real codebase, you often want to run multiple tasks
 in parallel — fix a bug, add a feature, write tests — without them stepping on
 each other. Git worktrees give you cheap, isolated copies of your repo. cwt
 manages the lifecycle of those worktrees and the provider sessions inside them,
@@ -39,7 +39,7 @@ all from a single TUI.
 - **git** (with worktree support)
 - **zellij** or **tmux** (interactive mode needs one local terminal multiplexer;
   zellij is preferred when both are installed)
-- A provider CLI (`claude` or `codex`)
+- A provider CLI (`claude`, `codex`, or `pi`)
 
 Optional:
 
@@ -189,8 +189,8 @@ cwt status                             # CLI summary across repos
 
 ### Session Providers
 
-- cwt supports two provider options: `claude` and `codex`
-- You can set the default in config with `session.provider = "claude"` or `"codex"`
+- cwt supports three provider options: `claude`, `codex`, and `pi`
+- You can set the default in config with `session.provider = "claude"`, `"codex"`, or `"pi"`
 - You can change the active provider at runtime by pressing `o` in the TUI
 - Press `O` to persist the currently selected provider as the default
 - Local interactive mode prefers **zellij** and falls back to **tmux**
@@ -198,9 +198,10 @@ cwt status                             # CLI summary across repos
   preferred backend
 - In zellij, provider sessions and shells open in named tabs; in tmux, they
   open in panes/windows
-- **Launch** the provider (Claude or Codex) in the active multiplexer attached
+- **Launch** the active provider in the active multiplexer attached
   to any worktree
-- **Resume** previous sessions using the active provider's resume flow (`--resume` for Claude)
+- **Resume** previous sessions using the active provider's resume flow
+  (`--resume` for Claude, `resume <id>` for Codex, `--session <id>` for Pi)
 - **Focus** an existing session tab/pane with a single keypress
 - **Open shell** in any worktree directory via the active multiplexer
 - Sessions survive TUI exit — closing cwt does not kill running sessions
@@ -216,11 +217,12 @@ cwt status                             # CLI summary across repos
 
 ### Hooks (Real-Time Provider Integration)
 
+- cwt provider support includes `pi`, but hook automation is still Claude-only in this phase
 - **Unix domain socket** listener for sub-second event delivery
-- Worktrees created by the provider (Claude or Codex) outside cwt appear in the list within one
-  second
+- Worktrees created by Claude outside cwt appear in the list within one second
 - `cwt hooks install` patches `.claude/settings.json` and writes hook scripts to
   `.cwt/hooks/`
+- Pi and Codex sessions do not currently get hook installation or real-time worktree import support
 
 ### Forest Mode (Multi-Repo)
 
@@ -251,25 +253,26 @@ cwt status                             # CLI summary across repos
 
 ### Permission Levels
 
-cwt supports three permission tiers for provider sessions (Claude/Codex), giving you
+cwt supports three permission tiers for provider sessions, giving you
 fine-grained control over how much autonomy the provider gets:
 
 | Level | Badge | Behavior |
 | ----- | ----- | -------- |
 | **Normal** | `N` (gray) | Plain provider command — asks for permission on each tool use (default) |
-| **Elevated** | `E` (yellow) | Injects sandbox settings into `.claude/settings.local.json` — the provider runs autonomously within a sandbox |
-| **Elevated Unsandboxed** | `U!` (red) | Appends `--dangerously-skip-permissions` — full autonomy, no sandbox |
+| **Elevated** | `E` (yellow) | Uses provider-specific elevated behavior; for Claude this injects sandbox settings into `.claude/settings.local.json` |
+| **Elevated Unsandboxed** | `U!` (red) | Uses provider-specific unsandboxed behavior or configured extra args |
 
 - Press `m` to cycle through modes at runtime
 - Press `M` to save the current mode as the default in your config
 - The active level is shown as a badge in the top bar
-- Each worktree gets its own `.claude/settings.local.json`, so there are no
-  concurrency conflicts between sessions
+- Claude worktrees get their own `.claude/settings.local.json`, so there are no
+  concurrency conflicts between Claude sessions
 
 Provider-specific mode behavior:
 
 - Claude: `Elevated` injects sandbox settings; `Unsandboxed` uses `--dangerously-skip-permissions`.
 - Codex: `Unsandboxed` uses `--full-auto`; `Elevated Unsandboxed` uses `--dangerously-bypass-approvals-and-sandbox`.
+- Pi: cwt passes only the configured `session.permissions.<level>.extra_args`; no Claude settings injection or Codex-specific flags are applied.
 
 The elevated (sandboxed) provider mode writes these settings before launch:
 
@@ -328,7 +331,7 @@ The elevated (sandboxed) provider mode writes these settings before launch:
 | --- | -------------------------------------------- | ------- |
 | `m` | Cycle mode (Normal/Unsandboxed/Elevated Unsandboxed) | Global  |
 | `M` | Save current mode as default               | Global  |
-| `o` | Cycle session provider (Claude/Codex) at runtime | Global  |
+| `o` | Cycle session provider (Claude/Codex/Pi) at runtime | Global  |
 | `O` | Save current provider as default           | Global  |
 
 ### Navigation
@@ -358,9 +361,9 @@ The elevated (sandboxed) provider mode writes these settings before launch:
 | `cwt delete <name>`                 | Delete a worktree (saves snapshot) |
 | `cwt promote <name>`                | Promote ephemeral to permanent     |
 | `cwt gc [--execute]`                | Preview/run garbage collection     |
-| `cwt hooks install`                 | Install provider hook scripts      |
-| `cwt hooks uninstall`               | Remove hook scripts                |
-| `cwt hooks status`                  | Show hook and socket status        |
+| `cwt hooks install`                 | Install Claude hook scripts        |
+| `cwt hooks uninstall`               | Remove Claude hook scripts         |
+| `cwt hooks status`                  | Show Claude hook and socket status |
 | `cwt dispatch "task" ...`           | Dispatch parallel tasks            |
 | `cwt import --github [--limit N]`   | Import GitHub issues as worktrees  |
 | `cwt import --linear [--limit N]`   | Import Linear issues as worktrees  |
@@ -402,7 +405,7 @@ timeout_secs = 120               # setup script timeout
 
 [session]
 auto_launch = true               # launch session provider on worktree create
-provider = "claude"              # "claude" | "codex"
+provider = "claude"              # "claude" | "codex" | "pi"
 command = ""                     # optional command override (defaults to provider binary)
 provider_args = []               # extra args for provider invocation
 default_permission = "normal"    # "normal", "elevated", or "elevated_unsandboxed"
@@ -470,14 +473,16 @@ first, then run `cwt` again. When both are installed locally, `cwt` prefers
 
 **Worktrees don't appear after a provider creates them** Run
 `cwt hooks install` to set up the real-time hook integration. Without hooks, cwt
-discovers worktrees on periodic refresh (every few seconds).
+discovers worktrees on periodic refresh (every few seconds). Hook-based import is
+currently Claude-only.
 
 **`gh` commands fail (PR creation, CI status)** Make sure the
 [GitHub CLI](https://cli.github.com/) is installed and authenticated
 (`gh auth login`).
 
 **Sessions show "idle" even though the provider is running** cwt detects session
-status by parsing `~/.claude/projects/` transcripts. If the path hash doesn't
+status by parsing provider session transcripts. Claude/Codex use
+`~/.claude/projects/`; Pi uses `~/.pi/agent/sessions/`. If the path hash doesn't
 match, status won't update. Restarting cwt re-scans the project directory.
 
 **GC skipped a worktree I expected it to prune** GC never prunes worktrees with

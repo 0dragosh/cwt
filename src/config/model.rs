@@ -3,16 +3,16 @@ use serde::{Deserialize, Serialize};
 use crate::remote::host::RemoteHost;
 use crate::session::provider::SessionProvider;
 
-/// Permission level for Claude Code sessions.
+/// Permission level for provider sessions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
-    /// Plain `claude` — asks for permission on each tool use.
+    /// Plain provider command — asks for permission on each tool use.
     #[default]
     Normal,
-    /// Injects sandbox settings into `.claude/settings.local.json` before launch.
+    /// Injects sandbox settings into `.claude/settings.local.json` before launch for Claude.
     Elevated,
-    /// Appends `--dangerously-skip-permissions` — full autonomy, no sandbox.
+    /// Uses the provider-specific unsandboxed mode or configured extra args.
     ElevatedUnsandboxed,
 }
 
@@ -48,10 +48,10 @@ impl PermissionLevel {
 /// Configuration for a single permission level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PermissionLevelConfig {
-    /// Extra CLI arguments appended to the claude command.
+    /// Extra CLI arguments appended to the provider command.
     #[serde(default)]
     pub extra_args: Vec<String>,
-    /// JSON value merged into `<worktree>/.claude/settings.local.json` before launch.
+    /// JSON value merged into `<worktree>/.claude/settings.local.json` before launch for Claude.
     #[serde(default)]
     pub settings_override: Option<serde_json::Value>,
 }
@@ -172,7 +172,7 @@ impl Default for SetupConfig {
 pub struct SessionConfig {
     #[serde(default = "default_true")]
     pub auto_launch: bool,
-    /// Session provider implementation (e.g. Claude, Codex).
+    /// Session provider implementation (e.g. Claude, Codex, Pi).
     #[serde(default)]
     pub provider: SessionProvider,
     /// The command to launch. Defaults to the provider's canonical CLI binary.

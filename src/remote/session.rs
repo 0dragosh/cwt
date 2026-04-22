@@ -17,11 +17,17 @@ impl<'a> RemoteCommandConfig<'a> {
     fn command_or_default(&self) -> String {
         self.provider.resolve_command(self.command)
     }
+
+    fn permission_args(&self) -> Vec<String> {
+        self.provider
+            .effective_permission_args(self.permission, self.permissions)
+    }
 }
 
-/// Launch a Claude Code session on a remote host via SSH + tmux.
+/// Launch a provider session on a remote host via SSH + tmux.
 ///
-/// This creates a tmux session on the remote machine and runs `claude` inside it.
+/// This creates a tmux session on the remote machine and runs the configured
+/// session CLI inside it.
 /// The local user can then attach via `ssh -t host tmux attach -t <session>`.
 ///
 /// Returns the remote tmux session name for tracking.
@@ -40,22 +46,8 @@ pub fn launch_remote_session(
     for arg in cmd_cfg.provider_args {
         provider_parts.push(remote_shell_quote(arg));
     }
-    let permission_args: Vec<String> = if cmd_cfg.provider == SessionProvider::Codex {
-        cmd_cfg
-            .provider
-            .permission_args(cmd_cfg.permission)
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect()
-    } else {
-        cmd_cfg
-            .permissions
-            .get(cmd_cfg.permission)
-            .extra_args
-            .clone()
-    };
-    for arg in permission_args {
-        provider_parts.push(arg);
+    for arg in cmd_cfg.permission_args() {
+        provider_parts.push(remote_shell_quote(&arg));
     }
     let provider_cmd = provider_parts.join(" ");
 
@@ -98,22 +90,8 @@ pub fn resume_remote_session(
     for arg in cmd_cfg.provider_args {
         provider_parts.push(remote_shell_quote(arg));
     }
-    let permission_args: Vec<String> = if cmd_cfg.provider == SessionProvider::Codex {
-        cmd_cfg
-            .provider
-            .permission_args(cmd_cfg.permission)
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect()
-    } else {
-        cmd_cfg
-            .permissions
-            .get(cmd_cfg.permission)
-            .extra_args
-            .clone()
-    };
-    for arg in permission_args {
-        provider_parts.push(arg);
+    for arg in cmd_cfg.permission_args() {
+        provider_parts.push(remote_shell_quote(&arg));
     }
     let provider_cmd = provider_parts.join(" ");
 
@@ -210,12 +188,12 @@ pub fn check_remote_session_status(host: &RemoteHost, worktree_name: &str) -> Re
     match host.ssh_exec_fallible(&check_cmd) {
         Ok((stdout, _, true)) => {
             let command = stdout.trim().to_string();
-            if command.contains("claude") || command.contains("codex") || command == "node" {
+            if SessionProvider::matches_any_process(&command) {
                 RemoteSessionStatus::Running
             } else if command.is_empty() {
                 RemoteSessionStatus::Unknown
             } else {
-                // Session exists but claude might have exited
+                // Session exists but the provider CLI has exited.
                 RemoteSessionStatus::Done
             }
         }
@@ -273,4 +251,44 @@ pub fn open_remote_shell(
 /// Wraps in single quotes and escapes any embedded single quotes.
 fn remote_shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::model::{PermissionLevelConfig, PermissionsConfig};
+
+    #[test]
+    fn remote_config_resolves_pi_default_command() {
+        let permissions = PermissionsConfig::default();
+        let cfg = RemoteCommandConfig {
+            provider: SessionProvider::Pi,
+            command: "claude",
+            provider_args: &[],
+            permission: crate::config::model::PermissionLevel::Normal,
+            permissions: &permissions,
+        };
+
+        assert_eq!(cfg.command_or_default(), "pi");
+    }
+
+    #[test]
+    fn remote_pi_uses_configured_permission_args() {
+        let permissions = PermissionsConfig {
+            elevated: PermissionLevelConfig {
+                extra_args: vec!["--allow-write".to_string()],
+                settings_override: None,
+            },
+            ..PermissionsConfig::default()
+        };
+        let cfg = RemoteCommandConfig {
+            provider: SessionProvider::Pi,
+            command: "",
+            provider_args: &[],
+            permission: crate::config::model::PermissionLevel::Elevated,
+            permissions: &permissions,
+        };
+
+        assert_eq!(cfg.permission_args(), vec!["--allow-write"]);
+    }
 }

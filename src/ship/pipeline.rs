@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::session::provider::SessionProvider;
 use crate::ship::pr::{self, CiStatus, PrStatus};
 use crate::worktree::model::Worktree;
 
@@ -16,7 +17,11 @@ pub struct ShipResult {
 /// 1. Commit staged changes + push the worktree branch
 /// 2. Create a PR
 /// 3. Return the PR info so the caller can mark the worktree as "shipping"
-pub fn ship(worktree: &Worktree, worktree_path: &Path) -> Result<ShipResult> {
+pub fn ship(
+    provider: SessionProvider,
+    worktree: &Worktree,
+    worktree_path: &Path,
+) -> Result<ShipResult> {
     // Check gh is available
     if !pr::gh_available() {
         anyhow::bail!("gh CLI not found. Install it: https://cli.github.com/");
@@ -27,7 +32,7 @@ pub fn ship(worktree: &Worktree, worktree_path: &Path) -> Result<ShipResult> {
         .context("failed to commit and push")?;
 
     // Step 2: Generate PR body from transcript
-    let body = pr::generate_pr_body(worktree_path, worktree);
+    let body = pr::generate_pr_body(provider, worktree_path, worktree);
 
     // Step 3: Create PR
     let title = pr::generate_pr_title(worktree);
