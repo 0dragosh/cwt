@@ -274,7 +274,10 @@ mod tests {
         );
         let cfg = SessionConfig {
             provider: crate::session::provider::SessionProvider::Pi,
-            provider_args: vec!["--model".to_string(), "anthropic/claude-sonnet-4-5".to_string()],
+            provider_args: vec![
+                "--model".to_string(),
+                "anthropic/claude-sonnet-4-5".to_string(),
+            ],
             ..SessionConfig::default()
         };
 
@@ -314,13 +317,7 @@ mod tests {
             ..PermissionsConfig::default()
         };
 
-        let cmd = build_provider_command(
-            &wt,
-            &cfg,
-            None,
-            PermissionLevel::Elevated,
-            &permissions,
-        );
+        let cmd = build_provider_command(&wt, &cfg, None, PermissionLevel::Elevated, &permissions);
 
         assert!(cmd.contains("'--allow-dangerous'"));
         assert!(!cmd.contains("--full-auto"));

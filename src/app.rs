@@ -462,13 +462,11 @@ impl App {
                     })
                     .unwrap_or_default();
 
-                let session_id = project_dir
-                    .as_ref()
-                    .and_then(|dir| {
-                        session::tracker::find_latest_session_id(provider, dir)
-                            .ok()
-                            .flatten()
-                    });
+                let session_id = project_dir.as_ref().and_then(|dir| {
+                    session::tracker::find_latest_session_id(provider, dir)
+                        .ok()
+                        .flatten()
+                });
 
                 ui::inspector::InspectorInfo {
                     diff_stat_text,
@@ -605,21 +603,19 @@ impl App {
 
     fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::Key(key) => {
-                if should_process_key_event(&key) {
-                    self.handle_key(key)?;
-                }
+            Event::Key(key) if should_process_key_event(&key) => {
+                self.handle_key(key)?;
             }
             Event::Mouse(mouse) => {
                 self.handle_mouse(mouse);
             }
-            Event::FocusGained => {
+            Event::FocusGained
                 if refresh_post_create_delete_guard_on_focus_return(
                     &mut self.suppress_delete_until,
                     &mut self.awaiting_focus_return_after_create,
-                ) {
-                    let _ = drain_pending_terminal_events();
-                }
+                ) =>
+            {
+                let _ = drain_pending_terminal_events();
             }
             Event::FocusLost => {}
             _ => {}
@@ -751,10 +747,10 @@ impl App {
             KeyCode::Char('s') => {
                 self.launch_session()?;
             }
-            KeyCode::Char('d') => {
-                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) {
-                    self.open_delete_dialog()?;
-                }
+            KeyCode::Char('d')
+                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) =>
+            {
+                self.open_delete_dialog()?;
             }
             KeyCode::Char('h') => {
                 self.open_handoff_dialog()?;
@@ -856,13 +852,10 @@ impl App {
                     }
                 }
             }
-            KeyCode::Esc => {
-                // Clear filter if active
-                if !self.filter.is_empty() {
-                    self.filter.clear();
-                    self.status_message.clear();
-                    self.clamp_selection();
-                }
+            KeyCode::Esc if !self.filter.is_empty() => {
+                self.filter.clear();
+                self.status_message.clear();
+                self.clamp_selection();
             }
             _ => {}
         }
@@ -1396,10 +1389,8 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => {
                 dialog.move_selection(-1);
             }
-            KeyCode::Enter => {
-                if !dialog.snapshots.is_empty() {
-                    dialog.confirmed = true;
-                }
+            KeyCode::Enter if !dialog.snapshots.is_empty() => {
+                dialog.confirmed = true;
             }
             KeyCode::Esc => {
                 dialog.cancelled = true;
@@ -1564,10 +1555,8 @@ impl App {
             KeyCode::Esc => {
                 dialog.cancelled = true;
             }
-            KeyCode::Enter => {
-                if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 {
-                    dialog.confirmed = true;
-                }
+            KeyCode::Enter if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 => {
+                dialog.confirmed = true;
             }
             KeyCode::Backspace => {
                 dialog.prompt_input.pop();
@@ -2712,13 +2701,11 @@ impl ForestApp {
                 .and_then(|dir| session::transcript::read_transcript_info(provider, dir, 1).ok())
                 .unwrap_or_default();
 
-            let session_id = project_dir
-                .as_ref()
-                .and_then(|dir| {
-                    session::tracker::find_latest_session_id(provider, dir)
-                        .ok()
-                        .flatten()
-                });
+            let session_id = project_dir.as_ref().and_then(|dir| {
+                session::tracker::find_latest_session_id(provider, dir)
+                    .ok()
+                    .flatten()
+            });
 
             ui::inspector::InspectorInfo {
                 diff_stat_text,
@@ -2875,21 +2862,19 @@ impl ForestApp {
 
     fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::Key(key) => {
-                if should_process_key_event(&key) {
-                    self.handle_key(key)?;
-                }
+            Event::Key(key) if should_process_key_event(&key) => {
+                self.handle_key(key)?;
             }
             Event::Mouse(mouse) => {
                 self.handle_mouse(mouse);
             }
-            Event::FocusGained => {
+            Event::FocusGained
                 if refresh_post_create_delete_guard_on_focus_return(
                     &mut self.suppress_delete_until,
                     &mut self.awaiting_focus_return_after_create,
-                ) {
-                    let _ = drain_pending_terminal_events();
-                }
+                ) =>
+            {
+                let _ = drain_pending_terminal_events();
             }
             Event::FocusLost => {}
             _ => {}
@@ -3067,10 +3052,10 @@ impl ForestApp {
             KeyCode::Char('s') => {
                 self.launch_session()?;
             }
-            KeyCode::Char('d') => {
-                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) {
-                    self.open_delete_dialog()?;
-                }
+            KeyCode::Char('d')
+                if !should_ignore_delete_shortcut(&mut self.suppress_delete_until) =>
+            {
+                self.open_delete_dialog()?;
             }
             KeyCode::Char('h') => {
                 self.open_handoff_dialog()?;
@@ -3162,12 +3147,10 @@ impl ForestApp {
                     self.status_message = "No repo selected".to_string();
                 }
             }
-            KeyCode::Esc => {
-                if !self.filter.is_empty() {
-                    self.filter.clear();
-                    self.status_message.clear();
-                    self.clamp_wt_selection();
-                }
+            KeyCode::Esc if !self.filter.is_empty() => {
+                self.filter.clear();
+                self.status_message.clear();
+                self.clamp_wt_selection();
             }
             _ => {}
         }
@@ -3449,10 +3432,8 @@ impl ForestApp {
             KeyCode::Char('k') | KeyCode::Up => {
                 dialog.move_selection(-1);
             }
-            KeyCode::Enter => {
-                if !dialog.snapshots.is_empty() {
-                    dialog.confirmed = true;
-                }
+            KeyCode::Enter if !dialog.snapshots.is_empty() => {
+                dialog.confirmed = true;
             }
             KeyCode::Esc => {
                 dialog.cancelled = true;
@@ -3908,10 +3889,8 @@ impl ForestApp {
             KeyCode::Esc => {
                 dialog.cancelled = true;
             }
-            KeyCode::Enter => {
-                if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 {
-                    dialog.confirmed = true;
-                }
+            KeyCode::Enter if !dialog.prompt_input.trim().is_empty() && dialog.target_count > 0 => {
+                dialog.confirmed = true;
             }
             KeyCode::Backspace => {
                 dialog.prompt_input.pop();

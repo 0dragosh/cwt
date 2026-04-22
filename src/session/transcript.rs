@@ -186,7 +186,10 @@ fn parse_transcript_entry(provider: SessionProvider, line: &str) -> Option<Parse
 }
 
 fn parse_claude_compatible_entry(value: &serde_json::Value) -> Option<ParsedTranscriptEntry> {
-    let role = value.get("role").and_then(|role| role.as_str())?.to_string();
+    let role = value
+        .get("role")
+        .and_then(|role| role.as_str())?
+        .to_string();
     Some(ParsedTranscriptEntry {
         content: extract_content_text(value.get("content")?),
         counts_as_message: matches!(role.as_str(), "assistant" | "user"),
@@ -372,9 +375,17 @@ mod tests {
     #[test]
     fn read_last_messages_respects_newest_jsonl() {
         let dir = tempfile::tempdir().unwrap();
-        write_transcript(&dir, "older.jsonl", &[r#"{"role":"assistant","content":"old"}"#]);
+        write_transcript(
+            &dir,
+            "older.jsonl",
+            &[r#"{"role":"assistant","content":"old"}"#],
+        );
         std::thread::sleep(Duration::from_millis(15));
-        write_transcript(&dir, "newer.jsonl", &[r#"{"role":"assistant","content":"new"}"#]);
+        write_transcript(
+            &dir,
+            "newer.jsonl",
+            &[r#"{"role":"assistant","content":"new"}"#],
+        );
 
         let messages = read_last_messages(SessionProvider::Claude, dir.path(), 1).unwrap();
         assert_eq!(messages.len(), 1);

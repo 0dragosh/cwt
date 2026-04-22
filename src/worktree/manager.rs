@@ -47,7 +47,7 @@ impl Manager {
     pub fn list(&self) -> Result<Vec<Worktree>> {
         let state = self.load_state()?;
         let mut worktrees: Vec<Worktree> = state.worktrees.values().cloned().collect();
-        worktrees.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        worktrees.sort_by_key(|a| a.created_at);
         Ok(worktrees)
     }
 
@@ -286,7 +286,7 @@ impl Manager {
         let state = self.load_state()?;
         let mut snaps = state.snapshots;
         // Most recent first
-        snaps.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        snaps.sort_by_key(|b| std::cmp::Reverse(b.deleted_at));
         Ok(snaps)
     }
 

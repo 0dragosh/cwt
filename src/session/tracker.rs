@@ -26,7 +26,10 @@ pub fn check_status(tmux_pane: Option<&str>) -> WorktreeStatus {
 }
 
 /// Find the provider-specific session directory for a given worktree path.
-pub fn find_project_dir(provider: SessionProvider, worktree_path: &Path) -> Result<Option<PathBuf>> {
+pub fn find_project_dir(
+    provider: SessionProvider,
+    worktree_path: &Path,
+) -> Result<Option<PathBuf>> {
     let home_dir = match dirs::home_dir() {
         Some(home) => home,
         None => return Ok(None),
@@ -134,7 +137,9 @@ fn find_project_dir_with_home(
 
 fn provider_session_root(provider: SessionProvider, home_dir: &Path) -> PathBuf {
     match provider {
-        SessionProvider::Claude | SessionProvider::Codex => home_dir.join(".claude").join("projects"),
+        SessionProvider::Claude | SessionProvider::Codex => {
+            home_dir.join(".claude").join("projects")
+        }
         SessionProvider::Pi => home_dir.join(".pi").join("agent").join("sessions"),
     }
 }
@@ -150,7 +155,7 @@ fn provider_dir_name(provider: SessionProvider, encoded_core: &str) -> String {
     }
 }
 
-fn normalize_provider_dir_name<'a>(provider: SessionProvider, dir_name: &'a str) -> &'a str {
+fn normalize_provider_dir_name(provider: SessionProvider, dir_name: &str) -> &str {
     match provider {
         SessionProvider::Claude | SessionProvider::Codex => dir_name,
         SessionProvider::Pi => dir_name
@@ -181,10 +186,7 @@ mod tests {
             SessionProvider::Pi,
             &encode_path_component(&canonical.to_string_lossy()),
         );
-        let expected = home
-            .path()
-            .join(".pi/agent/sessions")
-            .join(&encoded);
+        let expected = home.path().join(".pi/agent/sessions").join(&encoded);
         std::fs::create_dir_all(&expected).unwrap();
 
         let found = find_project_dir_with_home(SessionProvider::Pi, &worktree, home.path())
@@ -202,10 +204,7 @@ mod tests {
             SessionProvider::Claude,
             &encode_path_component(&canonical.to_string_lossy()),
         );
-        let expected = home
-            .path()
-            .join(".claude/projects")
-            .join(&encoded);
+        let expected = home.path().join(".claude/projects").join(&encoded);
         std::fs::create_dir_all(&expected).unwrap();
 
         let claude = find_project_dir_with_home(SessionProvider::Claude, &worktree, home.path())

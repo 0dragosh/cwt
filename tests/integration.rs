@@ -724,8 +724,7 @@ fn test_hooks_uninstall_cleans_settings_json() {
 
     // managed cwt entries should be removed from hook arrays
     if let Some(stop_hooks) = settings["hooks"]["Stop"].as_array() {
-        let expected = root
-            .join(".cwt/hooks/cwt-stop.sh");
+        let expected = root.join(".cwt/hooks/cwt-stop.sh");
         let expected = canonical_path_string(&expected);
         assert!(
             !stop_hooks

@@ -154,7 +154,10 @@ impl RemoteHost {
         let check = if command_name.contains('/') {
             format!("test -x {}", ssh_shell_quote(command_name))
         } else {
-            format!("command -v {} >/dev/null 2>&1", ssh_shell_quote(command_name))
+            format!(
+                "command -v {} >/dev/null 2>&1",
+                ssh_shell_quote(command_name)
+            )
         };
 
         self.ssh_exec_fallible(&check)

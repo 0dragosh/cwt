@@ -36,7 +36,10 @@ impl SessionProvider {
     /// active provider selection rather than pinning a previous default.
     pub fn resolve_command(self, configured_command: &str) -> String {
         let trimmed = configured_command.trim();
-        if trimmed.is_empty() || Self::all().iter().any(|provider| trimmed == provider.default_command())
+        if trimmed.is_empty()
+            || Self::all()
+                .iter()
+                .any(|provider| trimmed == provider.default_command())
         {
             self.default_command().to_string()
         } else {
@@ -171,7 +174,10 @@ mod tests {
             serde_json::to_string(&SessionProvider::Codex).unwrap(),
             "\"codex\""
         );
-        assert_eq!(serde_json::to_string(&SessionProvider::Pi).unwrap(), "\"pi\"");
+        assert_eq!(
+            serde_json::to_string(&SessionProvider::Pi).unwrap(),
+            "\"pi\""
+        );
         assert_eq!(
             serde_json::from_str::<SessionProvider>("\"pi\"").unwrap(),
             SessionProvider::Pi
