@@ -337,13 +337,13 @@ impl Manager {
 
         // Apply committed changes first
         if !committed_patch.trim().is_empty() {
-            git::commands::apply_patch(&wt_abs_path, committed_patch.trim())
+            git::commands::apply_patch(&wt_abs_path, &committed_patch)
                 .context("failed to apply committed changes from snapshot")?;
         }
 
         // Apply uncommitted changes
         if !uncommitted_patch.trim().is_empty() {
-            git::commands::apply_patch(&wt_abs_path, uncommitted_patch.trim())
+            git::commands::apply_patch(&wt_abs_path, &uncommitted_patch)
                 .context("failed to apply uncommitted changes from snapshot")?;
         }
 
@@ -418,5 +418,112 @@ impl Manager {
         } else {
             worktree.path.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct HomeGuard {
+        previous_home: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl HomeGuard {
+        fn set(home: &Path) -> Self {
+            let lock = ENV_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("env lock should not be poisoned");
+            let previous_home = std::env::var_os("HOME");
+            std::env::set_var("HOME", home);
+            Self {
+                previous_home,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            if let Some(previous_home) = &self.previous_home {
+                std::env::set_var("HOME", previous_home);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {} failed to start: {e}", args.join(" ")));
+        assert!(
+            out.status.success(),
+            "git {} failed in {}:\n{}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn make_repo() -> (TempDir, PathBuf) {
+        let temp = TempDir::new().expect("create temp repo");
+        let root = std::fs::canonicalize(temp.path()).expect("canonical repo path");
+        run_git(&root, &["init", "--initial-branch=main"]);
+        run_git(&root, &["config", "user.email", "test@cwt.dev"]);
+        run_git(&root, &["config", "user.name", "cwt-test"]);
+        std::fs::write(root.join("README.md"), "# restore repo\n").expect("write README");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "initial commit"]);
+        (temp, root)
+    }
+
+    #[test]
+    fn restore_snapshot_preserves_snapshot_metadata_and_recreates_worktree() {
+        let home = TempDir::new().expect("create home");
+        let _home_guard = HomeGuard::set(home.path());
+        let (_temp, root) = make_repo();
+        let manager = Manager::new(root.clone(), Config::default());
+
+        let worktree = manager
+            .create(Some("restore-wt"), "main", false)
+            .expect("create worktree");
+        let wt_path = manager.worktree_abs_path(&worktree);
+        std::fs::write(
+            wt_path.join("README.md"),
+            "# restore repo\nrestored change\n",
+        )
+        .expect("write worktree change");
+
+        manager.delete("restore-wt").expect("delete worktree");
+        let snapshots_before = manager.list_snapshots().expect("list snapshots");
+        assert_eq!(snapshots_before.len(), 1);
+        let snapshot = snapshots_before[0].clone();
+        assert!(snapshot.patch_file.exists());
+
+        let restored = manager
+            .restore_snapshot(&snapshot)
+            .expect("restore snapshot");
+
+        assert_eq!(restored.name, "restore-wt");
+        let state = manager.load_state().expect("load state");
+        assert!(state.worktrees.contains_key("restore-wt"));
+        assert_eq!(state.snapshots.len(), snapshots_before.len());
+        assert_eq!(state.snapshots[0].name, "restore-wt");
+        assert!(snapshot.patch_file.exists());
+
+        let restored_path = manager.worktree_abs_path(&restored);
+        let restored_readme =
+            std::fs::read_to_string(restored_path.join("README.md")).expect("read restored file");
+        assert!(restored_readme.contains("restored change"));
     }
 }
