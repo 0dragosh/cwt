@@ -14,6 +14,24 @@
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      verusVersion = "0.2026.04.19.6f7d4de";
+      verusSources = {
+        aarch64-darwin = {
+          asset = "verus-${verusVersion}-arm64-macos.zip";
+          hash = "sha256-RMv+8CiyJ66XFN2nJ8QZnuYLakIQXJ8PIH47BQbRCxY=";
+          rustToolchain = "1.95.0-aarch64-apple-darwin";
+        };
+        x86_64-darwin = {
+          asset = "verus-${verusVersion}-x86-macos.zip";
+          hash = "sha256-Dfw54tQcwfmkZpJHgy5Hry/hL3TM9oRK/wKyJ+ZaAvc=";
+          rustToolchain = "1.95.0-x86_64-apple-darwin";
+        };
+        x86_64-linux = {
+          asset = "verus-${verusVersion}-x86-linux.zip";
+          hash = "sha256-cChaGWIBB9HYez/Ef1DFshhP5AVDe5hqPzEGuE/rdKU=";
+          rustToolchain = "1.95.0-x86_64-unknown-linux-gnu";
+        };
+      };
     in
     {
       packages = forAllSystems (system:
@@ -75,7 +93,68 @@
             overlays = [ rust-overlay.overlays.default ];
           };
           rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [ "rust-src" "rust-analyzer" ];
+            extensions = [ "rust-src" "rust-analyzer" "clippy" ];
+          };
+          verusMeta = verusSources.${system} or null;
+          verus = if verusMeta == null then null else pkgs.stdenvNoCC.mkDerivation {
+            pname = "verus";
+            version = verusVersion;
+
+            src = pkgs.fetchurl {
+              url = "https://github.com/verus-lang/verus/releases/download/release/${verusVersion}/${verusMeta.asset}";
+              hash = verusMeta.hash;
+            };
+
+            nativeBuildInputs = with pkgs; [ unzip makeWrapper ];
+            dontBuild = true;
+            unpackPhase = ''
+              runHook preUnpack
+              mkdir source
+              unzip -q "$src" -d source
+              cd source
+              runHook postUnpack
+            '';
+
+            installPhase = ''
+              runHook preInstall
+
+              mkdir -p "$out/lib/verus" "$out/bin"
+              release_root=
+              for dir in */; do
+                release_root="$dir"
+                break
+              done
+              if [ -z "$release_root" ]; then
+                echo "Verus release zip did not contain a top-level directory" >&2
+                exit 1
+              fi
+              cp -R "$release_root"/. "$out/lib/verus"
+              chmod -R u+w "$out/lib/verus"
+              chmod +x "$out/lib/verus/verus" "$out/lib/verus/cargo-verus" \
+                "$out/lib/verus/rust_verify" "$out/lib/verus/z3"
+              makeWrapper "$out/lib/verus/verus" "$out/bin/verus" \
+                --run "cd $out/lib/verus"
+              makeWrapper "$out/lib/verus/cargo-verus" "$out/bin/cargo-verus" \
+                --run "cd $out/lib/verus"
+
+              runHook postInstall
+            '';
+          };
+          verusShell = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              rustup
+              unzip
+              verus
+            ];
+
+            shellHook = ''
+              echo "cwt Verus shell - Verus ${verusVersion}"
+              echo "  verify: ./scripts/verify-verus.sh"
+              if ! rustup run ${verusMeta.rustToolchain} rustc --version >/dev/null 2>&1; then
+                echo "Verus requires Rust toolchain ${verusMeta.rustToolchain}"
+                echo "Install it with: rustup install ${verusMeta.rustToolchain}"
+              fi
+            '';
           };
         in
         {
@@ -97,6 +176,8 @@
               echo "  cargo run -- tui         # launch TUI"
             '';
           };
+        } // pkgs.lib.optionalAttrs (verusMeta != null) {
+          verus = verusShell;
         }
       );
 

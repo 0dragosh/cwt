@@ -215,3 +215,75 @@ pub fn execute(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {} failed to start: {e}", args.join(" ")));
+        assert!(
+            out.status.success(),
+            "git {} failed in {}:\n{}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn make_repo() -> (TempDir, std::path::PathBuf) {
+        let temp = TempDir::new().expect("create temp repo");
+        let root = temp.path().to_path_buf();
+        run_git(&root, &["init", "--initial-branch=main"]);
+        run_git(&root, &["config", "user.email", "test@cwt.dev"]);
+        run_git(&root, &["config", "user.name", "cwt-test"]);
+        std::fs::write(root.join("README.md"), "# handoff repo\n").expect("write README");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "initial commit"]);
+        (temp, root)
+    }
+
+    #[test]
+    fn local_to_worktree_handoff_preserves_source_and_only_mutates_target() {
+        let (_temp, root) = make_repo();
+        let wt_path = root.join("wt-target");
+        run_git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                wt_path.to_str().expect("utf-8 path"),
+                "-b",
+                "wt/handoff-target",
+                "main",
+            ],
+        );
+
+        let changed_readme = "# handoff repo\nlocal change\n";
+        std::fs::write(root.join("README.md"), changed_readme).expect("write local change");
+
+        execute(HandoffDirection::LocalToWorktree, &wt_path, &root, None)
+            .expect("handoff should apply local patch to worktree");
+
+        let local_readme = std::fs::read_to_string(root.join("README.md")).expect("read local");
+        let target_readme =
+            std::fs::read_to_string(wt_path.join("README.md")).expect("read target");
+        assert_eq!(local_readme, changed_readme);
+        assert_eq!(target_readme, changed_readme);
+
+        let local_status = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&root)
+            .output()
+            .expect("git status");
+        assert!(
+            String::from_utf8_lossy(&local_status.stdout).contains("README.md"),
+            "source repo should still hold its uncommitted change"
+        );
+    }
+}
