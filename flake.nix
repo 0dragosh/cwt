@@ -49,6 +49,14 @@
                 relPath = pkgs.lib.removePrefix "${toString ./.}/" (toString path);
               in
               craneLib.filterCargoSources path type
+              # Keep the verification sidecar alongside Cargo sources so Nix
+              # test builds see the same workflow artifacts as local runs.
+              || relPath == "verification"
+              || pkgs.lib.hasPrefix "verification/" relPath
+              || relPath == "scripts"
+              || relPath == "scripts/verify-verus.sh"
+              || relPath == "docs"
+              || relPath == "docs/verification.md"
               || relPath == ".github"
               || relPath == ".github/workflows"
               || pkgs.lib.hasPrefix ".github/workflows/" relPath;
