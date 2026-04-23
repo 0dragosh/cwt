@@ -1,6 +1,6 @@
 [package]
 name = "cwt"
-version = "0.2.13"
+version = "0.2.14"
 edition = "2021"
 description = "Provider Worktree Manager — TUI for managing git worktrees with Claude, Codex, or Pi"
 license = "MIT"
