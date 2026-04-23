@@ -2,7 +2,7 @@
 name = "cwt"
 version = "0.2.11"
 edition = "2021"
-description = "Claude Worktree Manager — TUI for managing git worktrees with Claude Code"
+description = "Provider Worktree Manager — TUI for managing git worktrees with Claude, Codex, or Pi"
 license = "MIT"
 repository = "https://github.com/0dragosh/cwt"
 homepage = "https://github.com/0dragosh/cwt"

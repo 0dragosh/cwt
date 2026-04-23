@@ -93,19 +93,8 @@ fn build_provider_command(
         cmd_parts.push(shell_quote(arg));
     }
 
-    let permission_args: Vec<String> =
-        if provider == crate::session::provider::SessionProvider::Codex {
-            provider
-                .permission_args(permission)
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect()
-        } else {
-            permissions.get(permission).extra_args.clone()
-        };
-
-    for arg in permission_args {
-        cmd_parts.push(arg);
+    for arg in provider.effective_permission_args(permission, permissions) {
+        cmd_parts.push(shell_quote(&arg));
     }
 
     let provider_cmd = cmd_parts.join(" ");
@@ -271,6 +260,68 @@ mod tests {
             cmd.starts_with("codex"),
             "expected codex command, got: {cmd}"
         );
+    }
+
+    #[test]
+    fn provider_builds_pi_resume_command() {
+        let wt = Worktree::new(
+            "wt-pi".to_string(),
+            std::path::PathBuf::from("/tmp/wt-pi"),
+            "wt/wt-pi".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            crate::worktree::model::Lifecycle::Ephemeral,
+        );
+        let cfg = SessionConfig {
+            provider: crate::session::provider::SessionProvider::Pi,
+            provider_args: vec![
+                "--model".to_string(),
+                "anthropic/claude-sonnet-4-5".to_string(),
+            ],
+            ..SessionConfig::default()
+        };
+
+        let cmd = build_provider_command(
+            &wt,
+            &cfg,
+            Some("session-42"),
+            PermissionLevel::Normal,
+            &PermissionsConfig::default(),
+        );
+
+        assert!(cmd.starts_with("pi"));
+        assert!(cmd.contains("'--session'"));
+        assert!(cmd.contains("'session-42'"));
+        assert!(cmd.contains("'--model'"));
+    }
+
+    #[test]
+    fn pi_uses_configured_permission_args_instead_of_codex_special_flags() {
+        let wt = Worktree::new(
+            "wt-pi".to_string(),
+            std::path::PathBuf::from("/tmp/wt-pi"),
+            "wt/wt-pi".to_string(),
+            "main".to_string(),
+            "HEAD".to_string(),
+            crate::worktree::model::Lifecycle::Ephemeral,
+        );
+        let cfg = SessionConfig {
+            provider: crate::session::provider::SessionProvider::Pi,
+            ..SessionConfig::default()
+        };
+        let permissions = PermissionsConfig {
+            elevated: crate::config::model::PermissionLevelConfig {
+                extra_args: vec!["--allow-dangerous".to_string()],
+                settings_override: None,
+            },
+            ..PermissionsConfig::default()
+        };
+
+        let cmd = build_provider_command(&wt, &cfg, None, PermissionLevel::Elevated, &permissions);
+
+        assert!(cmd.contains("'--allow-dangerous'"));
+        assert!(!cmd.contains("--full-auto"));
+        assert!(!cmd.contains("--dangerously-bypass-approvals-and-sandbox"));
     }
 
     // --- json_deep_merge ---

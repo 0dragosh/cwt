@@ -68,7 +68,7 @@ pub fn render(f: &mut Frame, scroll: u16) {
             vec![
                 ("m", "Cycle mode (Normal/Unsandboxed/Elevated Unsandboxed)"),
                 ("M", "Save current mode as default"),
-                ("o", "Cycle provider (Claude/Codex)"),
+                ("o", "Cycle provider (Claude/Codex/Pi)"),
                 ("O", "Save current provider as default"),
             ],
         ),

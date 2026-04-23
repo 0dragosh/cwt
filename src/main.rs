@@ -26,7 +26,7 @@ use std::process::Command as ProcessCommand;
 #[derive(Parser)]
 #[command(
     name = "cwt",
-    about = "Claude Worktree Manager — TUI for managing git worktrees with Claude Code"
+    about = "Provider Worktree Manager — TUI for managing git worktrees with Claude, Codex, or Pi"
 )]
 #[command(version)]
 struct Cli {
@@ -70,7 +70,7 @@ enum Commands {
     },
     /// Launch the interactive TUI
     Tui,
-    /// Manage Claude Code hooks integration
+    /// Manage Claude-only hooks integration
     Hooks {
         #[command(subcommand)]
         action: HooksAction,
@@ -84,7 +84,7 @@ enum Commands {
     Forest,
     /// Show a summary of all registered repos and active sessions
     Status,
-    /// Dispatch multiple tasks in parallel: creates a worktree per task with Claude
+    /// Dispatch multiple tasks in parallel: creates a worktree per task with the active provider
     Dispatch {
         /// Task descriptions (one worktree per task)
         tasks: Vec<String>,
@@ -115,7 +115,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum HooksAction {
-    /// Install cwt hooks into the Claude Code configuration
+    /// Install cwt hooks into the Claude Code configuration (.claude/settings.json)
     Install,
     /// Remove cwt hooks from the Claude Code configuration
     Uninstall,
@@ -441,7 +441,11 @@ fn interactive_entrypoint(command: Option<&Commands>) -> bool {
 
 fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
     // Startup checks
-    startup_checks()?;
+    startup_checks(&[manager
+        .config
+        .session
+        .provider
+        .resolve_command(&manager.config.session.command)])?;
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -524,7 +528,7 @@ fn run_tui(manager: Manager, config_meta: config::ConfigMeta) -> Result<()> {
 }
 
 /// Perform startup checks and provide friendly error messages.
-fn startup_checks() -> Result<()> {
+fn startup_checks(session_commands: &[String]) -> Result<()> {
     // Check that git is available
     if which::which("git").is_err() {
         eprintln!("error: git not found on PATH");
@@ -543,13 +547,7 @@ fn startup_checks() -> Result<()> {
         eprintln!();
     }
 
-    // Check that claude is available (warn but don't block)
-    if which::which("claude").is_err() {
-        eprintln!("warning: claude not found on PATH");
-        eprintln!("  Session launching requires Claude Code CLI.");
-        eprintln!("  Install: https://docs.anthropic.com/en/docs/claude-code");
-        eprintln!();
-    }
+    warn_missing_session_commands(session_commands);
 
     // Check that gh is available (warn but don't block)
     if which::which("gh").is_err() {
@@ -808,13 +806,15 @@ fn cmd_hooks(repo_root: &std::path::Path, action: HooksAction) -> Result<()> {
                 let content = std::fs::read_to_string(&settings_path)?;
                 let has_cwt = content.contains("cwt-");
                 if has_cwt {
-                    println!("  Claude: settings.json patched");
+                    println!("  Claude hooks: settings.json patched");
                 } else {
-                    println!("  Claude: settings.json exists but no cwt hooks registered");
+                    println!("  Claude hooks: settings.json exists but no cwt hooks registered");
                 }
             } else {
-                println!("  Claude: no .claude/settings.json found");
+                println!("  Claude hooks: no .claude/settings.json found");
             }
+
+            println!("  Other providers: Pi/Codex hooks are not managed in this phase");
         }
     }
 
@@ -1050,7 +1050,7 @@ fn run_forest_tui() -> Result<()> {
     }
 
     // Startup checks
-    startup_checks()?;
+    startup_checks(&[])?;
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -1105,6 +1105,56 @@ fn run_forest_tui() -> Result<()> {
     let _ = forest::index::refresh_index(&forest_config);
 
     Ok(())
+}
+
+fn warn_missing_session_commands(session_commands: &[String]) {
+    let mut commands: Vec<String> = if session_commands.is_empty() {
+        session::provider::SessionProvider::all()
+            .iter()
+            .map(|provider| provider.default_command().to_string())
+            .collect()
+    } else {
+        session_commands
+            .iter()
+            .map(|command| command.trim())
+            .filter(|command| !command.is_empty())
+            .map(|command| command.to_string())
+            .collect()
+    };
+
+    commands.sort();
+    commands.dedup();
+
+    if commands.is_empty() {
+        return;
+    }
+
+    let missing: Vec<String> = commands
+        .iter()
+        .filter(|command| which::which(command).is_err())
+        .cloned()
+        .collect();
+
+    if missing.is_empty() {
+        return;
+    }
+
+    if session_commands.is_empty() {
+        if missing.len() == commands.len() {
+            eprintln!("warning: no supported session CLI found on PATH");
+            eprintln!("  cwt can launch `claude`, `codex`, or `pi` sessions.");
+            eprintln!("  Install one of those CLIs, or configure `session.command` to use a custom binary.");
+            eprintln!();
+        }
+        return;
+    }
+
+    eprintln!(
+        "warning: configured session command not found on PATH: {}",
+        missing.join(", ")
+    );
+    eprintln!("  Session launching may fail until the selected provider CLI is installed.");
+    eprintln!();
 }
 
 #[cfg(test)]

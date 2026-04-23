@@ -1,10 +1,10 @@
-# cwt — Provider (Claude or Codex) Worktree Manager
+# cwt — Provider (Claude, Codex, or Pi) Worktree Manager
 
-A TUI worktree manager for the provider (Claude or Codex). The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
+A TUI worktree manager for the provider (Claude, Codex, or Pi). The worktree is the first-class primitive — sessions attach to worktrees, not the other way around.
 
 ## Project Overview
 
-`cwt` is a Rust TUI (ratatui + crossterm) that manages git worktrees purpose-built for parallel provider (Claude or Codex) sessions. It runs inside tmux and manages panes for each active session.
+`cwt` is a Rust TUI (ratatui + crossterm) that manages git worktrees purpose-built for parallel provider (Claude, Codex, or Pi) sessions. It runs inside tmux and manages panes for each active session.
 
 ### Core Mental Model
 
@@ -59,7 +59,7 @@ src/
   session/
     mod.rs
     launcher.rs             # Launch provider in tmux pane
-    tracker.rs              # Parse ~/.claude/ for session status
+    tracker.rs              # Parse provider session directories for session status
     transcript.rs           # Read last N messages from session JSONL
   tmux/
     mod.rs
@@ -155,7 +155,8 @@ src/
 - Status check: `tmux list-panes -F '#{pane_title} #{pane_current_command}'`
 
 ### Session Transcript Preview
-- The provider stores sessions at `~/.claude/projects/<path-hash>/` (Claude-compatible transcript path).
+- Claude/Codex store sessions at `~/.claude/projects/<path-hash>/`.
+- Pi stores sessions at `~/.pi/agent/sessions/--<path-hash>--/`.
 - Each session is a `.jsonl` file with conversation turns
 - Parse the last 2-3 assistant messages for the "Last msg" preview
 - Show token count / cost if available in the transcript
@@ -169,7 +170,8 @@ src/
 
 ### Hooks (Provider Integration)
 
-cwt integrates with the provider (Claude or Codex) via its hook system for real-time state sync.
+cwt integrates with providers for session management, and currently integrates with Claude hooks for real-time state sync.
+Pi and Codex do not get hook installation or hook-driven worktree import in this phase.
 
 #### Communication Path
 ```
@@ -214,7 +216,7 @@ Unix sockets are used instead of file polling for sub-second latency and clean a
 | `Tab` | Switch panel focus | Global |
 | `/` | Filter/search worktrees | Worktree list |
 | `?` | Help overlay | Global |
-| `o` | Cycle session provider (Claude/Codex) at runtime | Global |
+| `o` | Cycle session provider (Claude/Codex/Pi) at runtime | Global |
 | `O` | Save current provider as default | Global |
 | `q` | Quit | Global |
 
@@ -233,7 +235,7 @@ timeout_secs = 120               # setup script timeout
 
 [session]
 auto_launch = true               # launch provider on worktree create
-provider = "claude"              # "claude" | "codex"
+provider = "claude"              # "claude" | "codex" | "pi"
 provider_args = []               # extra args for provider invocation
 
 [handoff]

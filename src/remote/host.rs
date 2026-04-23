@@ -144,10 +144,24 @@ impl RemoteHost {
             .unwrap_or(false)
     }
 
-    /// Check if claude is available on the remote host.
-    pub fn has_claude(&self) -> bool {
-        self.ssh_exec("which claude")
-            .map(|s| !s.trim().is_empty())
+    /// Check if a session CLI is available on the remote host.
+    pub fn has_provider(&self, command_name: &str) -> bool {
+        let command_name = command_name.trim();
+        if command_name.is_empty() {
+            return false;
+        }
+
+        let check = if command_name.contains('/') {
+            format!("test -x {}", ssh_shell_quote(command_name))
+        } else {
+            format!(
+                "command -v {} >/dev/null 2>&1",
+                ssh_shell_quote(command_name)
+            )
+        };
+
+        self.ssh_exec_fallible(&check)
+            .map(|(_, _, success)| success)
             .unwrap_or(false)
     }
 
@@ -324,19 +338,23 @@ pub struct RemoteHostStatus {
     pub network: NetworkStatus,
     pub has_git: bool,
     pub has_tmux: bool,
-    pub has_claude: bool,
+    pub has_session_cli: bool,
 }
 
 impl RemoteHostStatus {
     /// Check a remote host and build its status.
-    pub fn check(host: &RemoteHost) -> Self {
+    pub fn check(host: &RemoteHost, session_command: &str) -> Self {
         let network = match host.measure_latency() {
             Some(d) => NetworkStatus::Connected(d),
             None => NetworkStatus::Disconnected,
         };
 
-        let (has_git, has_tmux, has_claude) = if network != NetworkStatus::Disconnected {
-            (host.has_git(), host.has_tmux(), host.has_claude())
+        let (has_git, has_tmux, has_session_cli) = if network != NetworkStatus::Disconnected {
+            (
+                host.has_git(),
+                host.has_tmux(),
+                host.has_provider(session_command),
+            )
         } else {
             (false, false, false)
         };
@@ -346,7 +364,7 @@ impl RemoteHostStatus {
             network,
             has_git,
             has_tmux,
-            has_claude,
+            has_session_cli,
         }
     }
 
@@ -357,7 +375,7 @@ impl RemoteHostStatus {
             network: NetworkStatus::Unknown,
             has_git: false,
             has_tmux: false,
-            has_claude: false,
+            has_session_cli: false,
         }
     }
 }

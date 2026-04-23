@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::session;
+use crate::session::provider::SessionProvider;
 use crate::worktree::model::Worktree;
 
 /// PR status as reported by GitHub.
@@ -177,7 +178,11 @@ pub fn generate_pr_title(worktree: &Worktree) -> String {
 
 /// Generate a PR body from the task description and session transcript.
 /// Uses the task description if available, supplemented by transcript context.
-pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
+pub fn generate_pr_body(
+    provider: SessionProvider,
+    worktree_path: &Path,
+    worktree: &Worktree,
+) -> String {
     let mut body = String::new();
     body.push_str("## Summary\n\n");
 
@@ -198,10 +203,10 @@ pub fn generate_pr_body(worktree_path: &Path, worktree: &Worktree) -> String {
     }
 
     // Try to get transcript summary
-    let transcript_summary = session::tracker::find_project_dir(worktree_path)
+    let transcript_summary = session::tracker::find_project_dir(provider, worktree_path)
         .ok()
         .flatten()
-        .and_then(|dir| session::transcript::read_last_messages(&dir, 3).ok())
+        .and_then(|dir| session::transcript::read_last_messages(provider, &dir, 3).ok())
         .map(|messages| {
             let mut summary = String::new();
             for msg in &messages {

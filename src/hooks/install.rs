@@ -30,6 +30,7 @@ fn managed_hook_path_set(hooks_dir: &Path) -> HashSet<String> {
 }
 
 /// Install cwt hook scripts and patch .claude/settings.json.
+/// Hook automation is currently Claude-only.
 pub fn install_hooks(repo_root: &Path) -> Result<()> {
     let hooks_dir = repo_root.join(".cwt/hooks");
     std::fs::create_dir_all(&hooks_dir)
@@ -53,6 +54,7 @@ pub fn install_hooks(repo_root: &Path) -> Result<()> {
 
     println!("Installed cwt hooks to {}", hooks_dir.display());
     println!("Socket path: {}", sock_str);
+    println!("Provider scope: Claude only (.claude/settings.json)");
     Ok(())
 }
 

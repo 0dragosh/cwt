@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::session;
+use crate::session::provider::SessionProvider;
 use crate::session::transcript::TranscriptUsage;
 use crate::worktree::model::{Worktree, WorktreeStatus};
 
@@ -38,6 +39,18 @@ pub fn compute_aggregate_stats<F>(worktrees: &[Worktree], resolve_abs_path: F) -
 where
     F: Fn(&Worktree) -> std::path::PathBuf,
 {
+    compute_aggregate_stats_for_provider(worktrees, SessionProvider::Claude, resolve_abs_path)
+}
+
+/// Compute aggregate dashboard stats for a specific provider.
+pub fn compute_aggregate_stats_for_provider<F>(
+    worktrees: &[Worktree],
+    provider: SessionProvider,
+    resolve_abs_path: F,
+) -> AggregateStats
+where
+    F: Fn(&Worktree) -> std::path::PathBuf,
+{
     let mut stats = AggregateStats {
         total_sessions: worktrees.len(),
         ..Default::default()
@@ -53,7 +66,7 @@ where
         }
 
         let wt_abs = resolve_abs_path(wt);
-        let (usage, last_msg) = read_session_usage(&wt_abs);
+        let (usage, last_msg) = read_session_usage(provider, &wt_abs);
 
         stats.total_input_tokens += usage.input_tokens;
         stats.total_output_tokens += usage.output_tokens;
@@ -77,14 +90,18 @@ where
 }
 
 /// Read token usage and last message for a single worktree's session.
-fn read_session_usage(worktree_abs_path: &Path) -> (TranscriptUsage, String) {
-    let project_dir = session::tracker::find_project_dir(worktree_abs_path)
+fn read_session_usage(
+    provider: SessionProvider,
+    worktree_abs_path: &Path,
+) -> (TranscriptUsage, String) {
+    let project_dir = session::tracker::find_project_dir(provider, worktree_abs_path)
         .ok()
         .flatten();
 
     match project_dir {
         Some(dir) => {
-            let info = session::transcript::read_transcript_info(&dir, 1).unwrap_or_default();
+            let info =
+                session::transcript::read_transcript_info(provider, &dir, 1).unwrap_or_default();
             (info.usage, info.last_message)
         }
         None => (TranscriptUsage::default(), String::new()),

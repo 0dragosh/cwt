@@ -16,7 +16,7 @@ pub struct DispatchResult {
     pub error: Option<String>,
 }
 
-/// Dispatch multiple tasks: create a worktree for each and launch Claude with the task as prompt.
+/// Dispatch multiple tasks: create a worktree for each and launch the active provider.
 /// Returns a result per task.
 pub fn dispatch_tasks(
     manager: &Manager,
@@ -30,7 +30,7 @@ pub fn dispatch_tasks(
         .collect()
 }
 
-/// Dispatch a single task: create worktree, launch Claude with --prompt.
+/// Dispatch a single task: create worktree, then launch the active provider with the task.
 fn dispatch_one(
     manager: &Manager,
     task: &str,
@@ -52,7 +52,7 @@ fn dispatch_one(
 
     let wt_abs = manager.worktree_abs_path(&wt);
 
-    // Launch Claude with --prompt flag
+    // Launch the configured provider with the initial task prompt.
     let pane_id = match launch_with_prompt(&wt, &wt_abs, task, &manager.config.session, permission)
     {
         Ok(id) => id,
@@ -84,7 +84,7 @@ fn dispatch_one(
     }
 }
 
-/// Launch a provider session with an initial prompt using -p flag.
+/// Launch a provider session with an initial prompt.
 pub fn launch_with_prompt(
     worktree: &Worktree,
     worktree_abs_path: &Path,
@@ -104,28 +104,18 @@ pub fn launch_with_prompt(
         }
     }
 
-    let command = config.provider.resolve_command(&config.command);
-
-    let mut cmd_parts = vec![command];
-    // Add the prompt flag
-    cmd_parts.push("-p".to_string());
-    cmd_parts.push(shell_quote(prompt));
+    let mut cmd_parts = vec![config.provider.resolve_command(&config.command)];
+    for arg in config.provider.prompt_args(prompt) {
+        cmd_parts.push(shell_quote(&arg));
+    }
     for arg in &config.provider_args {
         cmd_parts.push(shell_quote(arg));
     }
-    let permission_args: Vec<String> =
-        if config.provider == crate::session::provider::SessionProvider::Codex {
-            config
-                .provider
-                .permission_args(permission)
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect()
-        } else {
-            config.permissions.get(permission).extra_args.clone()
-        };
-    for arg in permission_args {
-        cmd_parts.push(arg);
+    for arg in config
+        .provider
+        .effective_permission_args(permission, &config.permissions)
+    {
+        cmd_parts.push(shell_quote(&arg));
     }
     let command = cmd_parts.join(" ");
 
