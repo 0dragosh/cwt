@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.13](https://github.com/0dragosh/cwt/compare/v0.2.12...v0.2.13) - 2026-04-23
+
+### Added
+
+- add Verus workflow verification sidecar ([#51](https://github.com/0dragosh/cwt/pull/51))
+
 ## [0.2.12](https://github.com/0dragosh/cwt/compare/v0.2.11...v0.2.12) - 2026-04-23
 
 ### Added
