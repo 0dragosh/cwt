@@ -43,6 +43,9 @@ pub struct Worktree {
     pub tmux_pane: Option<String>,
     #[serde(default)]
     pub status: WorktreeStatus,
+    /// Latest Claude context usage percentage (0-100), when available from hooks.
+    #[serde(default)]
+    pub context_usage_percent: Option<u8>,
     /// PR number on GitHub (if a PR has been created).
     #[serde(default)]
     pub pr_number: Option<u64>,
@@ -100,6 +103,7 @@ impl Worktree {
             last_session_id: None,
             tmux_pane: None,
             status: WorktreeStatus::Idle,
+            context_usage_percent: None,
             pr_number: None,
             pr_url: None,
             pr_status: PrStatus::None,

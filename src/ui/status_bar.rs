@@ -8,8 +8,14 @@ const SHORTCUTS: &str =
     " {count} worktree(s) | n:new Ent:session h:handoff P:pr S:ship e:shell p:perm d:del g:gc r:restore t:tasks b:bcast m:mode o:provider ?:help q:quit";
 
 /// Render the status bar at the bottom.
-pub fn render(f: &mut Frame, area: Rect, message: &str, worktree_count: usize) {
-    render_with_remotes(f, area, message, worktree_count, &[]);
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    message: &str,
+    worktree_count: usize,
+    context_usage_percent: Option<u8>,
+) {
+    render_with_remotes(f, area, message, worktree_count, &[], context_usage_percent);
 }
 
 /// Render the status bar with optional remote host status indicators.
@@ -19,6 +25,7 @@ pub fn render_with_remotes(
     message: &str,
     worktree_count: usize,
     remote_statuses: &[crate::remote::host::RemoteHostStatus],
+    context_usage_percent: Option<u8>,
 ) {
     let mut spans = vec![
         Span::styled(
@@ -57,6 +64,13 @@ pub fn render_with_remotes(
         spans.push(Span::raw(" | "));
         spans.push(Span::raw(message));
     }
+    if let Some(pct) = context_usage_percent {
+        spans.push(Span::raw(" | "));
+        spans.push(Span::styled(
+            format!("Claude ctx:{}% (/context via hooks)", pct),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
 
     let line = Line::from(spans);
 
@@ -75,7 +89,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("test terminal");
 
         terminal
-            .draw(|frame| render(frame, frame.area(), message, 3))
+            .draw(|frame| render(frame, frame.area(), message, 3, None))
             .expect("render status bar");
 
         let buffer = terminal.backend().buffer();
@@ -93,5 +107,20 @@ mod tests {
         assert!(line.contains("h:handoff"));
         assert!(line.contains("P:pr"));
         assert!(line.contains("Sync in progress"));
+    }
+
+    #[test]
+    fn shows_claude_context_usage_hint_when_available() {
+        let backend = TestBackend::new(240, 1);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render(frame, frame.area(), "", 3, Some(82)))
+            .expect("render status bar");
+        let buffer = terminal.backend().buffer();
+        let mut line = String::new();
+        for x in 0..buffer.area.width {
+            line.push_str(buffer[(x, 0)].symbol());
+        }
+        assert!(line.contains("Claude ctx:82%"));
     }
 }
