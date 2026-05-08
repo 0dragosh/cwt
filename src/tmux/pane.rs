@@ -4,6 +4,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Stable name for the cwt navigator tab/window that stays open as a worktree explorer.
+pub const WORKTREES_EXPLORER_NAME: &str = "cwt:worktrees";
+
 /// Information about a tmux pane.
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
@@ -44,6 +47,20 @@ pub fn create_pane(worktree_path: &Path, command: &str, pane_title: &str) -> Res
     match preferred_multiplexer() {
         Multiplexer::Zellij => create_zellij_pane(worktree_path, command, pane_title),
         Multiplexer::Tmux => create_tmux_pane(worktree_path, command, pane_title),
+    }
+}
+
+/// Ensure the current tab/window is named as the persistent worktree explorer.
+pub fn ensure_worktrees_explorer_tab() -> Result<()> {
+    match preferred_multiplexer() {
+        Multiplexer::Zellij => {
+            zellij_action(&["rename-tab", WORKTREES_EXPLORER_NAME])?;
+            Ok(())
+        }
+        Multiplexer::Tmux => {
+            tmux(&["rename-window", WORKTREES_EXPLORER_NAME])?;
+            Ok(())
+        }
     }
 }
 
